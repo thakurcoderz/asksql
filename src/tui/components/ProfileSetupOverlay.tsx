@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { DbConfig } from "../../shared/types.ts";
 import { testConnection } from "../../core/mysql.ts";
 import { createProfile, profileExists } from "../../core/profiles/index.ts";
@@ -22,6 +22,17 @@ function label(field: Field): string {
   }
 }
 
+/** MySQL reports the client address it sees, not DB_HOST — common with Docker. */
+function formatConnectionError(message: string, config: DbConfig): string {
+  if (message.includes("using password: NO") && config.password) {
+    return `${message}\n(Password was not sent — try entering it again.)`;
+  }
+  if (message.includes("Access denied") && config.host === "127.0.0.1") {
+    return `${message}\n(MySQL shows the client IP it sees, e.g. a Docker bridge — not your DB_HOST.)`;
+  }
+  return message;
+}
+
 export function ProfileSetupOverlay(props: {
   onComplete: (profileName: string, database: string) => void;
   onCancel: () => void;
@@ -37,9 +48,15 @@ export function ProfileSetupOverlay(props: {
   const [overwrite, setOverwrite] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const inputRef = useRef("");
+  const [fieldInput, setFieldInput] = useState("");
+  const [inputKey, setInputKey] = useState(0);
 
   const field = FIELDS[step];
+
+  useEffect(() => {
+    setFieldInput("");
+    setInputKey((k) => k + 1);
+  }, [step, overwrite]);
 
   async function save(next: DbConfig, allowOverwrite: boolean) {
     setBusy(true);
@@ -49,7 +66,8 @@ export function ProfileSetupOverlay(props: {
       await createProfile(next, allowOverwrite);
       props.onComplete(next.database, next.database);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setError(formatConnectionError(message, next));
       setBusy(false);
     }
   }
@@ -83,7 +101,6 @@ export function ProfileSetupOverlay(props: {
       setConfig(next);
       if (profileExists(next.database)) {
         setOverwrite(true);
-        inputRef.current = "";
         return;
       }
       await save(next, false);
@@ -91,7 +108,6 @@ export function ProfileSetupOverlay(props: {
     }
 
     setStep((s) => s + 1);
-    inputRef.current = "";
   }
 
   return (
@@ -119,11 +135,11 @@ export function ProfileSetupOverlay(props: {
             Profile '{config.database}' exists. Type y to overwrite, anything else to cancel.
           </text>
           <input
+            key={inputKey}
+            value={fieldInput}
             focused={!busy}
-            onInput={(v) => {
-              inputRef.current = v;
-            }}
-            onSubmit={() => submit(inputRef.current)}
+            onInput={setFieldInput}
+            onSubmit={(v) => void submit(typeof v === "string" ? v : fieldInput)}
             style={{ width: "100%" }}
           />
         </>
@@ -139,6 +155,8 @@ export function ProfileSetupOverlay(props: {
             <text fg={theme.fg}>{label(field!)}: </text>
             <box style={{ flexGrow: 1 }}>
               <input
+                key={inputKey}
+                value={fieldInput}
                 focused={!busy}
                 placeholder={
                   field === "host"
@@ -151,10 +169,8 @@ export function ProfileSetupOverlay(props: {
                           ? "required"
                           : ""
                 }
-                onInput={(v) => {
-                  inputRef.current = v;
-                }}
-                onSubmit={() => submit(inputRef.current)}
+                onInput={setFieldInput}
+                onSubmit={(v) => void submit(typeof v === "string" ? v : fieldInput)}
                 style={{ width: "100%" }}
               />
             </box>

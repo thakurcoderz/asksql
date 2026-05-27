@@ -78,6 +78,7 @@ export function HelpOverlay(props: { hasProfile: boolean }) {
         <text fg={theme.warn}>Ask questions after /profile new or /use &lt;name&gt;.</text>
       )}
       <text fg={theme.fgDim}>ctrl+p palette · ctrl+l new chat · ctrl+r refresh schema · ctrl+c quit</text>
+      <text fg={theme.fgDim}>esc close · /help toggle</text>
     </box>
   );
 }

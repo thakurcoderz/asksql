@@ -4,6 +4,8 @@ Natural-language MySQL assistant powered by OpenRouter and OpenTUI.
 
 Ask questions in plain English; AskSQL inspects schema, runs gated SQL, and shows results in a terminal UI or CLI.
 
+![AskSQL TUI — natural language to SQL with schema inspection and formatted results](demo.jpg)
+
 ## Install
 
 ```bash
@@ -79,7 +81,8 @@ Commands are grouped by what you’re doing: **chat** vs **database** vs **sessi
 | `Ctrl+L` | New chat (`/new`) |
 | `Ctrl+R` | Refresh schema |
 | `Ctrl+C` | Quit |
-| `?` | Help |
+| `/help` | Toggle help overlay |
+| `Esc` | Close help or palette |
 
 ## Safety modes
 

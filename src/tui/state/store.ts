@@ -40,6 +40,7 @@ export type AppAction =
   | { type: "set-busy"; busy: boolean }
   | { type: "set-palette"; open: boolean }
   | { type: "set-help"; open: boolean }
+  | { type: "toggle-help" }
   | { type: "set-confirm"; confirm: ConfirmRequest | null }
   | { type: "set-profile-setup"; open: boolean }
   | { type: "toggle-inspector" };
@@ -127,6 +128,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, paletteOpen: action.open };
     case "set-help":
       return { ...state, helpOpen: action.open };
+    case "toggle-help":
+      return { ...state, helpOpen: !state.helpOpen };
     case "set-confirm":
       return { ...state, confirm: action.confirm };
     case "set-profile-setup":

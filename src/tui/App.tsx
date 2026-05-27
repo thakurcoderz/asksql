@@ -266,7 +266,7 @@ function App() {
 
       switch (cmd) {
         case "/help":
-          dispatch({ type: "set-help", open: true });
+          dispatch({ type: "toggle-help" });
           break;
         case "/new":
         case "/chat":
@@ -427,7 +427,6 @@ function App() {
         if (state.profile) refreshSchema(state.profile).catch(console.error);
       },
       onQuit: () => renderer.destroy(),
-      onToggleHelp: () => dispatch({ type: "set-help", open: true }),
       onAcceptGhost: () => {
         if (!acceptSlashSuggestion()) {
           dispatch({ type: "accept-ghost" });
@@ -449,6 +448,15 @@ function App() {
         dispatch({ type: "set-slash-pick", index: next });
         return;
       }
+    }
+
+    if (state.helpOpen && key.name === "escape") {
+      dispatch({ type: "set-help", open: false });
+      return;
+    }
+    if (state.paletteOpen && key.name === "escape") {
+      dispatch({ type: "set-palette", open: false });
+      return;
     }
 
     if (state.profileSetupOpen && key.name === "escape") {

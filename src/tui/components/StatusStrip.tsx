@@ -28,7 +28,7 @@ export function StatusStrip(props: {
         <span fg={theme.fgDim}> · </span>
         <span fg={theme.fgMuted}>{props.model}</span>
       </text>
-      <text fg={theme.fgDim}>ctrl+?</text>
+      <text fg={theme.fgDim}>/help</text>
     </box>
   );
 }
