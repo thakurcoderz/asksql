@@ -1,0 +1,29 @@
+{
+  "name": "asksql",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "asksql": "./src/cli/main.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "tui": "bun run src/tui/main.tsx",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.2.15",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.2.16",
+    "@opentui/keymap": "^0.2.16",
+    "@opentui/react": "^0.2.16",
+    "citty": "^0.2.2",
+    "mysql2": "^3.22.4",
+    "openai": "^6.39.0",
+    "react": "^19.2.6",
+    "smol-toml": "^1.6.1"
+  }
+}
