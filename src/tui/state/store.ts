@@ -12,16 +12,20 @@ export interface AppState {
   blocks: TranscriptBlock[];
   input: string;
   ghost: string;
+  slashPickIndex: number;
   busy: boolean;
   paletteOpen: boolean;
   helpOpen: boolean;
   confirm: ConfirmRequest | null;
   inspectorOpen: boolean;
+  profileSetupOpen: boolean;
 }
 
 export type AppAction =
   | { type: "set-input"; value: string; ghost?: string }
   | { type: "accept-ghost" }
+  | { type: "set-slash-pick"; index: number }
+  | { type: "accept-slash-suggestion"; value: string }
   | { type: "clear" }
   | { type: "set-mode"; mode: SafetyMode }
   | { type: "set-model"; model: string }
@@ -37,6 +41,7 @@ export type AppAction =
   | { type: "set-palette"; open: boolean }
   | { type: "set-help"; open: boolean }
   | { type: "set-confirm"; confirm: ConfirmRequest | null }
+  | { type: "set-profile-setup"; open: boolean }
   | { type: "toggle-inspector" };
 
 let nextId = 1;
@@ -47,10 +52,21 @@ export function uid(prefix = "b"): string {
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "set-input":
-      return { ...state, input: action.value, ghost: action.ghost ?? "" };
+      return { ...state, input: action.value, ghost: action.ghost ?? "", slashPickIndex: 0 };
     case "accept-ghost":
       if (!state.ghost) return state;
-      return { ...state, input: state.ghost, ghost: "" };
+      return { ...state, input: state.ghost, ghost: "", slashPickIndex: 0 };
+    case "set-slash-pick": {
+      const max = Math.max(0, action.index);
+      return { ...state, slashPickIndex: max };
+    }
+    case "accept-slash-suggestion":
+      return {
+        ...state,
+        input: action.value,
+        ghost: "",
+        slashPickIndex: 0,
+      };
     case "clear":
       return { ...state, blocks: [] };
     case "set-mode":
@@ -113,6 +129,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, helpOpen: action.open };
     case "set-confirm":
       return { ...state, confirm: action.confirm };
+    case "set-profile-setup":
+      return { ...state, profileSetupOpen: action.open };
     case "toggle-inspector":
       return { ...state, inspectorOpen: !state.inspectorOpen };
     default:

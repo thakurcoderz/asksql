@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import { createCliRenderer } from "@opentui/core";
 import { createRoot, useKeyboard, useRenderer } from "@opentui/react";
 import { getModel, getDefaultMode } from "../core/env.ts";
 import { loadConfig, saveConfig, setActiveProfile } from "../core/config.ts";
+import { ProfileSetupOverlay } from "./components/ProfileSetupOverlay.tsx";
+import { NoProfileState } from "./components/NoProfileState.tsx";
 import {
   listProfiles,
   loadProfileConfig,
   resolveActiveProfile,
+  profileExists,
 } from "../core/profiles/index.ts";
 import { readFileSync } from "node:fs";
 import { schemaPath, memoryPath } from "../core/paths.ts";
@@ -19,7 +22,8 @@ import { Transcript } from "./components/Transcript.tsx";
 import { PromptBar } from "./components/PromptBar.tsx";
 import { ConfirmOverlay } from "./components/ConfirmOverlay.tsx";
 import { CommandPalette, HelpOverlay } from "./components/CommandPalette.tsx";
-import { computeGhost } from "./autocomplete.ts";
+import { SlashAutocomplete } from "./components/SlashAutocomplete.tsx";
+import { computeGhost, getSlashSuggestions, shouldShowSlashMenu } from "./autocomplete.ts";
 import { theme } from "./theme.ts";
 import { setupKeymap } from "./keymap.ts";
 
@@ -46,11 +50,13 @@ function App() {
     blocks: [],
     input: "",
     ghost: "",
+    slashPickIndex: 0,
     busy: false,
     paletteOpen: false,
     helpOpen: false,
     confirm: null,
     inspectorOpen: false,
+    profileSetupOpen: false,
   };
 
   const [state, dispatch] = useReducer(appReducer, initial);
@@ -63,6 +69,25 @@ function App() {
 
   const profiles = listProfiles();
   const tables = state.profile ? loadSchemaTables(state.profile) : [];
+
+  const slashSuggestions = useMemo(
+    () => getSlashSuggestions(state.input, profiles, tables),
+    [state.input, profiles, tables],
+  );
+
+  const promptDisabled = state.busy || !!state.confirm || state.profileSetupOpen;
+  const showSlashMenu =
+    !promptDisabled && shouldShowSlashMenu(state.input, slashSuggestions);
+  const slashPickIndex = showSlashMenu
+    ? Math.min(state.slashPickIndex, Math.max(0, slashSuggestions.length - 1))
+    : 0;
+
+  const acceptSlashSuggestion = useCallback(() => {
+    if (!showSlashMenu || slashSuggestions.length === 0) return false;
+    const value = slashSuggestions[slashPickIndex]?.value ?? slashSuggestions[0]!.value;
+    dispatch({ type: "accept-slash-suggestion", value });
+    return true;
+  }, [showSlashMenu, slashSuggestions, slashPickIndex]);
 
   const flushChunks = useCallback(() => {
     if (!answerId.current || !chunkBuffer.current) return;
@@ -205,35 +230,85 @@ function App() {
       const parts = line.trim().split(/\s+/);
       const cmd = parts[0]!.toLowerCase();
 
+      const reply = (content: string) => {
+        dispatch({
+          type: "add-block",
+          block: { id: uid("ans"), kind: "answer", content, streaming: false },
+        });
+      };
+
+      const startNewChat = (note?: string) => {
+        chatHistoryRef.current = [];
+        dispatch({ type: "clear" });
+        if (note) reply(note);
+      };
+
+      const listProfileLines = () =>
+        profiles.map((p) => `- ${p}${p === state.profile ? " (active)" : ""}`).join("\n");
+
+      const switchProfile = (name: string) => {
+        if (!profileExists(name)) {
+          dispatch({
+            type: "add-block",
+            block: { id: uid("err"), kind: "error", message: `Profile '${name}' not found` },
+          });
+          return;
+        }
+        setActiveProfile(name);
+        const cfg = loadProfileConfig(name);
+        chatHistoryRef.current = [];
+        dispatch({ type: "clear" });
+        dispatch({ type: "set-profile", profile: name, database: cfg.database });
+        reply(
+          `Using **${name}** (${cfg.username}@${cfg.host}/${cfg.database}). New chat started.`,
+        );
+      };
+
       switch (cmd) {
         case "/help":
           dispatch({ type: "set-help", open: true });
           break;
+        case "/new":
+        case "/chat":
         case "/clear":
-          chatHistoryRef.current = [];
-          dispatch({ type: "clear" });
+          startNewChat("New chat started — ask your next question in plain English.");
           break;
         case "/quit":
         case "/exit":
           renderer.destroy();
           break;
         case "/profiles":
-          dispatch({
-            type: "add-block",
-            block: {
-              id: uid("ans"),
-              kind: "answer",
-              content: profiles.map((p) => `- ${p}${p === state.profile ? " (active)" : ""}`).join("\n"),
-              streaming: false,
-            },
-          });
+          if (profiles.length === 0) {
+            reply("No connections yet. Run `/profile new`.");
+            break;
+          }
+          reply(listProfileLines());
           break;
+        case "/profile": {
+          const sub = parts[1]?.toLowerCase();
+          if (sub === "new" || sub === "add") {
+            dispatch({ type: "set-profile-setup", open: true });
+            break;
+          }
+          if (sub === "list" || !sub) {
+            if (profiles.length === 0) {
+              reply("No connections yet. Run `/profile new`.");
+            } else {
+              reply(listProfileLines());
+            }
+            break;
+          }
+          switchProfile(parts[1]!);
+          break;
+        }
+        case "/use":
         case "/connect": {
           const name = parts[1];
-          if (!name) break;
-          setActiveProfile(name);
-          const cfg = loadProfileConfig(name);
-          dispatch({ type: "set-profile", profile: name, database: cfg.database });
+          if (!name) {
+            reply("Usage: /use <profile>  (alias: /connect)");
+            break;
+          }
+          switchProfile(name);
           break;
         }
         case "/mode": {
@@ -313,12 +388,33 @@ function App() {
       if (!trimmed) return;
       if (trimmed.startsWith("/")) {
         await handleSlash(trimmed);
+        dispatch({ type: "set-input", value: "", ghost: "" });
+        setInputKey();
+        return;
+      }
+      if (!state.profile) {
+        dispatch({
+          type: "add-block",
+          block: {
+            id: uid("err"),
+            kind: "error",
+            message: "Connect a database first: /profile new  or  /use <name>",
+          },
+        });
+        dispatch({ type: "set-input", value: "", ghost: "" });
+        setInputKey();
         return;
       }
       await runQuestion(trimmed);
     },
-    [handleSlash, runQuestion],
+    [handleSlash, runQuestion, state.profile],
   );
+
+  useEffect(() => {
+    if (profiles.length === 0 && !state.profile) {
+      dispatch({ type: "set-profile-setup", open: true });
+    }
+  }, []);
 
   useEffect(() => {
     setupKeymap(renderer, {
@@ -332,11 +428,33 @@ function App() {
       },
       onQuit: () => renderer.destroy(),
       onToggleHelp: () => dispatch({ type: "set-help", open: true }),
-      onAcceptGhost: () => dispatch({ type: "accept-ghost" }),
+      onAcceptGhost: () => {
+        if (!acceptSlashSuggestion()) {
+          dispatch({ type: "accept-ghost" });
+        }
+      },
     });
-  }, [renderer, state.profile]);
+  }, [renderer, state.profile, acceptSlashSuggestion]);
 
   useKeyboard((key) => {
+    if (showSlashMenu) {
+      if (key.name === "up") {
+        const next =
+          (slashPickIndex - 1 + slashSuggestions.length) % slashSuggestions.length;
+        dispatch({ type: "set-slash-pick", index: next });
+        return;
+      }
+      if (key.name === "down") {
+        const next = (slashPickIndex + 1) % slashSuggestions.length;
+        dispatch({ type: "set-slash-pick", index: next });
+        return;
+      }
+    }
+
+    if (state.profileSetupOpen && key.name === "escape") {
+      dispatch({ type: "set-profile-setup", open: false });
+      return;
+    }
     if (!state.confirm) return;
 
     if (key.name === "y") {
@@ -358,25 +476,7 @@ function App() {
     }
   }, [state.input, profiles, tables]);
 
-  if (!state.profile) {
-    return (
-      <box style={{ flexDirection: "column", width: "100%", height: "100%", backgroundColor: theme.bg }}>
-        <StatusStrip profile={null} mode={state.mode} model={state.model} />
-        <box
-          style={{
-            flexGrow: 1,
-            minHeight: 0,
-            flexDirection: "column",
-            width: "100%",
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
-          <text fg={theme.fgMuted}>No active profile. Run `asksql new` or `/connect`.</text>
-        </box>
-      </box>
-    );
-  }
+  const showTranscript = !!state.profile || state.blocks.length > 0;
 
   return (
     <box
@@ -398,16 +498,38 @@ function App() {
           width: "100%",
         }}
       >
-        <Transcript blocks={state.blocks} database={state.database} onExample={(q) => handleSubmit(q)} />
+        {showTranscript ? (
+          <Transcript
+            blocks={state.blocks}
+            database={state.database}
+            onExample={(q) => handleSubmit(q)}
+          />
+        ) : (
+          <NoProfileState profiles={profiles} />
+        )}
       </box>
-      <PromptBar
-        value={state.input}
-        ghost={state.ghost}
-        disabled={state.busy || !!state.confirm}
-        inputKey={inputKey}
-        onChange={(v) => dispatch({ type: "set-input", value: v, ghost: state.ghost })}
-        onSubmit={handleSubmit}
-      />
+      <box style={{ position: "relative", width: "100%", flexShrink: 0 }}>
+        {showSlashMenu && (
+          <SlashAutocomplete
+            suggestions={slashSuggestions}
+            selectedIndex={slashPickIndex}
+          />
+        )}
+        <PromptBar
+          value={state.input}
+          ghost={state.ghost}
+          disabled={promptDisabled}
+          inputKey={inputKey}
+          slashActive={showSlashMenu}
+          placeholder={
+            state.profile
+              ? undefined
+              : "Type /profile new or /use <name> — chat disabled until connected"
+          }
+          onChange={(v) => dispatch({ type: "set-input", value: v, ghost: state.ghost })}
+          onSubmit={handleSubmit}
+        />
+      </box>
       {state.paletteOpen && (
         <CommandPalette
           filter={state.input}
@@ -418,7 +540,27 @@ function App() {
           onClose={() => dispatch({ type: "set-palette", open: false })}
         />
       )}
-      {state.helpOpen && <HelpOverlay />}
+      {state.helpOpen && <HelpOverlay hasProfile={!!state.profile} />}
+      {state.profileSetupOpen && (
+        <ProfileSetupOverlay
+          onComplete={(name, database) => {
+            chatHistoryRef.current = [];
+            dispatch({ type: "clear" });
+            dispatch({ type: "set-profile", profile: name, database });
+            dispatch({ type: "set-profile-setup", open: false });
+            dispatch({
+              type: "add-block",
+              block: {
+                id: uid("ans"),
+                kind: "answer",
+                content: `Connected to **${name}**. New chat started — ask in plain English.`,
+                streaming: false,
+              },
+            });
+          }}
+          onCancel={() => dispatch({ type: "set-profile-setup", open: false })}
+        />
+      )}
       {state.confirm && (
         <ConfirmOverlay
           request={state.confirm}

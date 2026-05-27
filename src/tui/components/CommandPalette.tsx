@@ -1,11 +1,14 @@
 import { theme } from "../theme.ts";
 
 const ITEMS = [
-  { label: "/help — show commands", cmd: "/help" },
-  { label: "/profiles — list profiles", cmd: "/profiles" },
+  { label: "/new — fresh chat (forget prior questions)", cmd: "/new" },
+  { label: "/profile new — add MySQL connection", cmd: "/profile new" },
+  { label: "/use <name> — switch database", cmd: "/use " },
+  { label: "/profile list — list connections", cmd: "/profile list" },
   { label: "/mode safe|confirm|yolo", cmd: "/mode safe" },
+  { label: "/schema [table]", cmd: "/schema" },
   { label: "/refresh — refresh schema", cmd: "/refresh" },
-  { label: "/clear — clear chat", cmd: "/clear" },
+  { label: "/help — all commands", cmd: "/help" },
   { label: "/quit — exit", cmd: "/quit" },
 ];
 
@@ -48,7 +51,7 @@ export function CommandPalette(props: {
   );
 }
 
-export function HelpOverlay() {
+export function HelpOverlay(props: { hasProfile: boolean }) {
   return (
     <box
       style={{
@@ -63,8 +66,18 @@ export function HelpOverlay() {
         flexDirection: "column",
       }}
     >
-      <text fg={theme.fgMuted}>ctrl+p palette · ctrl+l clear · ctrl+r refresh · ctrl+c quit</text>
-      <text fg={theme.fgMuted}>tab accept suggestion · enter submit</text>
+      <text fg={theme.accent}>
+        <b>Chat</b>
+      </text>
+      <text fg={theme.fgMuted}>/new — new conversation (clears context for the agent)</text>
+      <text fg={theme.accent}>
+        <b>Database</b>
+      </text>
+      <text fg={theme.fgMuted}>/profile new · /profile list · /use &lt;name&gt;</text>
+      {!props.hasProfile && (
+        <text fg={theme.warn}>Ask questions after /profile new or /use &lt;name&gt;.</text>
+      )}
+      <text fg={theme.fgDim}>ctrl+p palette · ctrl+l new chat · ctrl+r refresh schema · ctrl+c quit</text>
     </box>
   );
 }

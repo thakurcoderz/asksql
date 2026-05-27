@@ -14,14 +14,28 @@ import { installAlias } from "./alias.ts";
 import { runAsk } from "./ask.ts";
 import { launchTui } from "../tui/main.tsx";
 
+async function launchDefaultTui(profile?: string) {
+  loadEnvCascade();
+  requireOpenRouterKey();
+  if (profile) setActiveProfile(profile);
+  await launchTui();
+}
+
 const main = defineCommand({
   meta: {
     name: "asksql",
     description: "AskSQL — natural-language MySQL assistant powered by OpenRouter",
   },
+  args: {
+    profile: {
+      type: "string",
+      alias: "p",
+      description: "Active profile for this session",
+    },
+  },
   subCommands: {
     new: defineCommand({
-      meta: { description: "Create a new database profile" },
+      meta: { description: "Create a new database profile (opens in TUI if available)" },
       run: async () => {
         loadEnvCascade();
         requireOpenRouterKey();
@@ -88,14 +102,14 @@ const main = defineCommand({
       },
     }),
     ask: defineCommand({
-      meta: { description: "One-shot question" },
+      meta: { description: "One-shot question (non-interactive)" },
       args: { question: { type: "positional", required: true } },
       run: async ({ args }) => {
         loadEnvCascade();
         requireOpenRouterKey();
         const profile = resolveActiveProfile();
         if (!profile) {
-          console.error("No active profile. Run asksql new or asksql connect <name>");
+          console.error("No active profile. Run asksql and use /new or /connect <name>");
           process.exit(1);
         }
         const config = loadConfig();
@@ -108,13 +122,10 @@ const main = defineCommand({
       },
     }),
     tui: defineCommand({
-      meta: { description: "Launch full-screen TUI" },
+      meta: { description: "Launch full-screen TUI (same as bare asksql)" },
       args: { profile: { type: "string", alias: "p" } },
       run: async ({ args }) => {
-        loadEnvCascade();
-        requireOpenRouterKey();
-        if (args.profile) setActiveProfile(String(args.profile));
-        await launchTui();
+        await launchDefaultTui(args.profile ? String(args.profile) : undefined);
       },
     }),
     alias: defineCommand({
@@ -125,6 +136,7 @@ const main = defineCommand({
       },
     }),
   },
+  default: "tui",
 });
 
 loadEnvCascade();

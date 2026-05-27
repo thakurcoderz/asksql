@@ -29,29 +29,57 @@ Legacy env names `DBAI_MODEL` and `DBAI_MODE` still work.
 
 ## Usage
 
+Run **`asksql`** to open the TUI (default). Profile setup and switching happen inside the app with slash commands.
+
 ```bash
-asksql new              # create a profile (MySQL connection + schema introspection)
-asksql tui              # launch the TUI
-asksql ask "how many users?"
-asksql list
-asksql connect <name>
-asksql remove <name>
-asksql rename <old> <new>
+asksql                  # launch TUI (same as asksql tui)
+asksql -p demo          # TUI with profile pre-selected
+asksql ask "how many users?"   # one-shot CLI (scripts)
+asksql list             # list profiles from shell
 asksql alias            # add alias ai=asksql to shell rc
 ```
 
-### TUI shortcuts
+After `bun link`, the binary is at `~/.bun/bin/asksql` (ensure `~/.bun/bin` is on your `PATH`).
+
+### Slash command autocomplete
+
+Type `/` in the prompt to open a command menu above the input. Each row shows the command and a short description (e.g. `/new` · create new chat). Only the **command** is inserted when you accept — not the description.
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Move selection |
+| `Tab` / `→` | Accept highlighted command into the prompt |
+
+Arg-taking commands (e.g. `/use`, `/profile`, `/mode`) insert with a trailing space so you can keep completing (profile names, modes, tables).
+
+### In-app slash commands
+
+Commands are grouped by what you’re doing: **chat** vs **database** vs **session**.
+
+| Command | Action |
+|---------|--------|
+| `/new` or `/chat` | **New chat** — clear screen and agent memory (same as `Ctrl+L`) |
+| `/clear` | Alias for `/new` |
+| `/profile new` | Add a MySQL connection (wizard) |
+| `/profile list` or `/profiles` | List saved connections |
+| `/use <name>` | Switch database and start a new chat |
+| `/connect <name>` | Alias for `/use` |
+| `/mode safe\|confirm\|yolo` | Change safety mode |
+| `/model <id>` | Change OpenRouter model |
+| `/refresh` | Re-introspect schema |
+| `/schema [table]` | Show schema summary |
+| `/help` | Show shortcuts |
+| `/quit` | Exit |
+
+**Tip:** `/new` starts a fresh conversation on the **same** database. `/use other_db` switches DB and also starts fresh. Chat is blocked until `/profile new` or `/use <name>`.
 
 | Key | Action |
 |-----|--------|
 | `Ctrl+P` | Command palette |
-| `Ctrl+L` | Clear chat |
+| `Ctrl+L` | New chat (`/new`) |
 | `Ctrl+R` | Refresh schema |
 | `Ctrl+C` | Quit |
 | `?` | Help |
-| `Tab` / `→` | Accept autocomplete ghost text |
-
-Slash commands in the prompt: `/help`, `/clear`, `/mode safe|confirm|yolo`, `/connect <profile>`, etc.
 
 ## Safety modes
 

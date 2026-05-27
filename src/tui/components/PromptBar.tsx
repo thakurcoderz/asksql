@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { theme } from "../theme.ts";
 import { PROMPT_ROWS } from "../layout.ts";
 
@@ -7,10 +7,17 @@ export function PromptBar(props: {
   ghost: string;
   disabled: boolean;
   inputKey: number;
+  slashActive?: boolean;
+  placeholder?: string;
   onChange: (v: string) => void;
   onSubmit: (v: string) => void;
 }) {
   const current = useRef(props.value);
+  const defaultPlaceholder = "Ask a question, or type /help";
+
+  useEffect(() => {
+    current.current = props.value;
+  }, [props.value]);
 
   return (
     <box
@@ -18,8 +25,8 @@ export function PromptBar(props: {
         width: "100%",
         height: PROMPT_ROWS,
         flexShrink: 0,
-        border: true,
-        borderColor: theme.border,
+        border: props.slashActive ? ["left", "top", "right", "bottom"] : true,
+        borderColor: props.slashActive ? theme.accent : theme.border,
         paddingLeft: 1,
         paddingRight: 1,
         flexDirection: "row",
@@ -30,10 +37,13 @@ export function PromptBar(props: {
       <box style={{ flexGrow: 1 }}>
         <input
           key={props.inputKey}
+          value={props.value}
           placeholder={
-            props.ghost && props.ghost.startsWith(props.value)
-              ? props.ghost
-              : "Ask a question, or type /help"
+            props.slashActive
+              ? undefined
+              : props.ghost && props.ghost.startsWith(props.value)
+                ? props.ghost
+                : props.placeholder ?? defaultPlaceholder
           }
           focused={!props.disabled}
           onInput={(v) => {

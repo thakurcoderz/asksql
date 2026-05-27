@@ -15,6 +15,8 @@ export const theme = {
   bgCard: "#0D1117",
   border: "#30363D",
   borderMuted: "#21262D",
+  slashPick: "#C67B4E",
+  slashPickFg: "#0D1117",
 };
 
 export const syntaxStyle = SyntaxStyle.fromStyles({
