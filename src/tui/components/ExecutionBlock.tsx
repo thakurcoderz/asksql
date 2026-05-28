@@ -7,6 +7,7 @@ import { sqlOneLine } from "../format/resultTable.ts";
 export function ExecutionBlock(props: {
   tool: "run_sql_read" | "run_sql_write";
   sql: string;
+  profile?: string;
   result?: SqlReadResult;
   writeResult?: { ok: boolean; rowcount?: number; error?: string };
   error?: string;
@@ -22,7 +23,7 @@ export function ExecutionBlock(props: {
   if (props.collapsed) {
     return (
       <text fg={theme.fgDim} style={{ paddingLeft: 2, marginBottom: 1 }}>
-        ↳ {isRead ? "read" : "write"} · {rowLabel} · {sqlOneLine(props.sql, 64)}
+        ↳ {props.profile ? `${props.profile} · ` : ""}{isRead ? "read" : "write"} · {rowLabel} · {sqlOneLine(props.sql, 64)}
       </text>
     );
   }
@@ -49,7 +50,7 @@ export function ExecutionBlock(props: {
         }}
       >
         <text fg={isRead ? theme.safe : theme.warn}>
-          {isRead ? "read" : "write"} · {rowLabel}
+          {props.profile ? `${props.profile} · ` : ""}{isRead ? "read" : "write"} · {rowLabel}
         </text>
       </box>
 

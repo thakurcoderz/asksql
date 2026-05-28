@@ -16,6 +16,7 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   { match: "/use", cmd: "/use", description: "switch database", needsArg: true },
   { match: "/connect", cmd: "/connect", description: "switch database", needsArg: true },
   { match: "/profile", cmd: "/profile", description: "manage connections", needsArg: true },
+  { match: "/project", cmd: "/project", description: "group profiles", needsArg: true },
   { match: "/profiles", cmd: "/profiles", description: "list saved connections" },
   { match: "/mode", cmd: "/mode", description: "set safety mode", needsArg: true },
   { match: "/model", cmd: "/model", description: "set OpenRouter model", needsArg: true },
@@ -30,6 +31,13 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
 export const PROFILE_COMMAND_DEFS: SlashCommandDef[] = [
   { match: "new", cmd: "new", description: "add MySQL connection" },
   { match: "list", cmd: "list", description: "list saved connections" },
+];
+
+export const PROJECT_COMMAND_DEFS: SlashCommandDef[] = [
+  { match: "new", cmd: "new", description: "create project from profiles" },
+  { match: "list", cmd: "list", description: "list projects" },
+  { match: "use", cmd: "use", description: "switch to project chat", needsArg: true },
+  { match: "add", cmd: "add", description: "add profile to active project", needsArg: true },
 ];
 
 export const MODE_COMMAND_DEFS: SlashCommandDef[] = [
@@ -52,6 +60,8 @@ ctrl+l — same as /new
 /profile new — add a MySQL connection
 /profile list · /profiles — list saved connections
 /use <name> — switch database (starts a new chat)
+/project new — group profiles for cross-DB chat
+/project use <name> — chat across project profiles
 
 **Session**
 /mode safe|confirm|yolo · /model <id>

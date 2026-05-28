@@ -1,8 +1,8 @@
-import type { SafetyMode } from "../shared/types.ts";
+import type { SafetyMode, AgentScope } from "../shared/types.ts";
 import { runAgentTurn } from "../core/agent/index.ts";
 
 export async function runAsk(opts: {
-  profile: string;
+  scope: AgentScope;
   question: string;
   mode: SafetyMode;
   model: string;
@@ -11,7 +11,7 @@ export async function runAsk(opts: {
 
   await runAgentTurn(
     {
-      profileName: opts.profile,
+      scope: opts.scope,
       mode: opts.mode,
       model: opts.model,
       onEvent: (event) => {

@@ -51,7 +51,10 @@ export function CommandPalette(props: {
   );
 }
 
-export function HelpOverlay(props: { hasProfile: boolean }) {
+export function HelpOverlay(props: {
+  hasProfile: boolean;
+  scopeKind?: "profile" | "project" | "none";
+}) {
   return (
     <box
       style={{
@@ -74,6 +77,7 @@ export function HelpOverlay(props: { hasProfile: boolean }) {
         <b>Database</b>
       </text>
       <text fg={theme.fgMuted}>/profile new · /profile list · /use &lt;name&gt;</text>
+      <text fg={theme.fgMuted}>/project new · /project list · /project use &lt;name&gt;</text>
       {!props.hasProfile && (
         <text fg={theme.warn}>Ask questions after /profile new or /use &lt;name&gt;.</text>
       )}

@@ -2,21 +2,28 @@ import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import { createCliRenderer } from "@opentui/core";
 import { createRoot, useKeyboard, useRenderer } from "@opentui/react";
 import { getModel, getDefaultMode } from "../core/env.ts";
-import { loadConfig, saveConfig, setActiveProfile } from "../core/config.ts";
+import { resolveActiveScope, scopeToAgentScope, setActiveProfile, setActiveProject, loadConfig, saveConfig } from "../core/config.ts";
 import { ProfileSetupOverlay } from "./components/ProfileSetupOverlay.tsx";
+import { ProjectSetupOverlay } from "./components/ProjectSetupOverlay.tsx";
 import { NoProfileState } from "./components/NoProfileState.tsx";
 import {
   listProfiles,
   loadProfileConfig,
-  resolveActiveProfile,
   profileExists,
 } from "../core/profiles/index.ts";
+import {
+  listProjects,
+  loadProject,
+  projectExists,
+  addProfileToProject,
+  resolveProjectProfiles,
+} from "../core/projects/index.ts";
 import { readFileSync } from "node:fs";
 import { schemaPath, memoryPath } from "../core/paths.ts";
 import type { Schema, SafetyMode, AgentEvent, ChatTurn } from "../shared/types.ts";
 import { MAX_CHAT_HISTORY } from "../shared/types.ts";
 import { runAgentTurn, refreshSchema } from "../core/agent/index.ts";
-import { appReducer, uid, type AppState } from "./state/store.ts";
+import { appReducer, uid, canChat, type AppState } from "./state/store.ts";
 import { StatusStrip } from "./components/StatusStrip.tsx";
 import { Transcript } from "./components/Transcript.tsx";
 import { PromptBar } from "./components/PromptBar.tsx";
@@ -36,15 +43,32 @@ function loadSchemaTables(profile: string): string[] {
   }
 }
 
-function App() {
-  const renderer = useRenderer();
+function buildInitialState(): AppState {
   const config = loadConfig();
-  const profile = resolveActiveProfile();
-  const dbConfig = profile ? loadProfileConfig(profile) : null;
+  const activeScope = resolveActiveScope();
 
-  const initial: AppState = {
+  let scopeKind: AppState["scopeKind"] = "none";
+  let profile: string | null = null;
+  let project: string | null = null;
+  let projectProfiles: string[] = [];
+  let database = "";
+
+  if (activeScope?.kind === "profile") {
+    scopeKind = "profile";
+    profile = activeScope.name;
+    database = loadProfileConfig(activeScope.name).database;
+  } else if (activeScope?.kind === "project") {
+    scopeKind = "project";
+    project = activeScope.name;
+    projectProfiles = activeScope.profiles;
+  }
+
+  return {
+    scopeKind,
     profile,
-    database: dbConfig?.database ?? "",
+    project,
+    projectProfiles,
+    database,
     mode: config.default_mode ?? getDefaultMode(),
     model: config.default_model ?? getModel(),
     blocks: [],
@@ -57,7 +81,13 @@ function App() {
     confirm: null,
     inspectorOpen: false,
     profileSetupOpen: false,
+    projectSetupOpen: false,
   };
+}
+
+function App() {
+  const renderer = useRenderer();
+  const initial = buildInitialState();
 
   const [state, dispatch] = useReducer(appReducer, initial);
   const [inputKey, setInputKey] = useReducer((n: number) => n + 1, 0);
@@ -68,14 +98,20 @@ function App() {
   const chatHistoryRef = useRef<ChatTurn[]>([]);
 
   const profiles = listProfiles();
-  const tables = state.profile ? loadSchemaTables(state.profile) : [];
+  const projects = listProjects();
+  const schemaProfile =
+    state.scopeKind === "profile"
+      ? state.profile
+      : state.projectProfiles[0] ?? null;
+  const tables = schemaProfile ? loadSchemaTables(schemaProfile) : [];
 
   const slashSuggestions = useMemo(
-    () => getSlashSuggestions(state.input, profiles, tables),
-    [state.input, profiles, tables],
+    () => getSlashSuggestions(state.input, profiles, tables, projects),
+    [state.input, profiles, tables, projects],
   );
 
-  const promptDisabled = state.busy || !!state.confirm || state.profileSetupOpen;
+  const promptDisabled =
+    state.busy || !!state.confirm || state.profileSetupOpen || state.projectSetupOpen;
   const showSlashMenu =
     !promptDisabled && shouldShowSlashMenu(state.input, slashSuggestions);
   const slashPickIndex = showSlashMenu
@@ -102,13 +138,15 @@ function App() {
           dispatch({ type: "sync-thinking" });
           break;
         case "schema": {
-          if (!state.profile) break;
-          const schema = JSON.parse(readFileSync(schemaPath(state.profile), "utf8")) as Schema;
+          const profileForSchema = event.profile ?? state.profile;
+          if (!profileForSchema) break;
+          const schema = JSON.parse(readFileSync(schemaPath(profileForSchema), "utf8")) as Schema;
           dispatch({
             type: "add-block",
             block: {
               id: uid("schema"),
               kind: "schema",
+              profile: event.profile,
               tables: event.tables.map((name) => ({
                 name,
                 colCount: schema.tables.find((t) => t.name === name)?.columns.length ?? 0,
@@ -126,6 +164,7 @@ function App() {
               kind: "execution",
               tool: event.tool,
               sql: event.sql,
+              profile: event.profile,
               result: event.result,
               writeResult: event.writeResult,
               error: event.error,
@@ -133,7 +172,15 @@ function App() {
           });
           break;
         case "memory":
-          dispatch({ type: "add-block", block: { id: uid("mem"), kind: "memory", section: event.section } });
+          dispatch({
+            type: "add-block",
+            block: {
+              id: uid("mem"),
+              kind: "memory",
+              section: event.section,
+              profile: event.profile,
+            },
+          });
           break;
         case "answer-chunk": {
           dispatch({ type: "clear-thinking" });
@@ -176,12 +223,26 @@ function App() {
           break;
       }
     },
-    [flushChunks, state.profile],
+    [flushChunks, state.profile, state.projectProfiles],
   );
+
+  const agentScope = useMemo(() => {
+    if (state.scopeKind === "profile" && state.profile) {
+      return { kind: "profile" as const, profileName: state.profile };
+    }
+    if (state.scopeKind === "project" && state.project) {
+      return {
+        kind: "project" as const,
+        projectName: state.project,
+        profileNames: state.projectProfiles,
+      };
+    }
+    return null;
+  }, [state.scopeKind, state.profile, state.project, state.projectProfiles]);
 
   const runQuestion = useCallback(
     async (question: string) => {
-      if (!state.profile || state.busy) return;
+      if (!agentScope || state.busy) return;
       dispatch({ type: "add-block", block: { id: uid("user"), kind: "user", text: question } });
       dispatch({ type: "set-input", value: "", ghost: "" });
       setInputKey();
@@ -192,7 +253,7 @@ function App() {
         const prior = chatHistoryRef.current;
         const answer = await runAgentTurn(
           {
-            profileName: state.profile,
+            scope: agentScope,
             mode: state.mode,
             model: state.model,
             onEvent: handleAgentEvent,
@@ -222,7 +283,7 @@ function App() {
         dispatch({ type: "set-busy", busy: false });
       }
     },
-    [state.profile, state.busy, state.mode, state.model, handleAgentEvent],
+    [agentScope, state.busy, state.mode, state.model, handleAgentEvent],
   );
 
   const handleSlash = useCallback(
@@ -246,6 +307,15 @@ function App() {
       const listProfileLines = () =>
         profiles.map((p) => `- ${p}${p === state.profile ? " (active)" : ""}`).join("\n");
 
+      const listProjectLines = () =>
+        projects
+          .map((p) => {
+            const proj = loadProject(p);
+            const active = p === state.project ? " (active)" : "";
+            return `- ${p}${active}: ${proj.profiles.join(", ")}`;
+          })
+          .join("\n");
+
       const switchProfile = (name: string) => {
         if (!profileExists(name)) {
           dispatch({
@@ -261,6 +331,24 @@ function App() {
         dispatch({ type: "set-profile", profile: name, database: cfg.database });
         reply(
           `Using **${name}** (${cfg.username}@${cfg.host}/${cfg.database}). New chat started.`,
+        );
+      };
+
+      const switchProject = (name: string) => {
+        if (!projectExists(name)) {
+          dispatch({
+            type: "add-block",
+            block: { id: uid("err"), kind: "error", message: `Project '${name}' not found` },
+          });
+          return;
+        }
+        const memberProfiles = resolveProjectProfiles(name);
+        setActiveProject(name);
+        chatHistoryRef.current = [];
+        dispatch({ type: "clear" });
+        dispatch({ type: "set-project", project: name, profiles: memberProfiles });
+        reply(
+          `Project **${name}** (${memberProfiles.length} DBs: ${memberProfiles.join(", ")}). New chat started — specify profile in tool calls.`,
         );
       };
 
@@ -311,6 +399,59 @@ function App() {
           switchProfile(name);
           break;
         }
+        case "/project": {
+          const sub = parts[1]?.toLowerCase();
+          if (sub === "new") {
+            dispatch({ type: "set-project-setup", open: true });
+            break;
+          }
+          if (sub === "list" || !sub) {
+            if (projects.length === 0) {
+              reply("No projects yet. Run `/project new`.");
+            } else {
+              reply(listProjectLines());
+            }
+            break;
+          }
+          if (sub === "use") {
+            const name = parts[2];
+            if (!name) {
+              reply("Usage: /project use <name>");
+              break;
+            }
+            switchProject(name);
+            break;
+          }
+          if (sub === "add") {
+            const profileName = parts[2];
+            if (!state.project) {
+              reply("No active project. Run `/project use <name>` first.");
+              break;
+            }
+            if (!profileName) {
+              reply("Usage: /project add <profile>");
+              break;
+            }
+            try {
+              addProfileToProject(state.project, profileName);
+              const updated = resolveProjectProfiles(state.project);
+              dispatch({ type: "set-project", project: state.project, profiles: updated });
+              reply(`Added **${profileName}** to project **${state.project}**.`);
+            } catch (e) {
+              dispatch({
+                type: "add-block",
+                block: {
+                  id: uid("err"),
+                  kind: "error",
+                  message: e instanceof Error ? e.message : String(e),
+                },
+              });
+            }
+            break;
+          }
+          switchProject(parts[1]!);
+          break;
+        }
         case "/mode": {
           const mode = parts[1] as SafetyMode;
           if (mode === "safe" || mode === "confirm" || mode === "yolo") {
@@ -332,7 +473,14 @@ function App() {
           break;
         }
         case "/refresh":
-          if (state.profile) await refreshSchema(state.profile);
+          if (state.scopeKind === "profile" && state.profile) {
+            await refreshSchema(state.profile);
+          } else if (state.scopeKind === "project") {
+            for (const p of state.projectProfiles) {
+              await refreshSchema(p);
+            }
+            reply(`Refreshed schema for ${state.projectProfiles.length} profile(s).`);
+          }
           break;
         case "/schema": {
           const table = parts[1];
@@ -379,7 +527,7 @@ function App() {
           break;
       }
     },
-    [profiles, renderer, state.profile],
+    [profiles, projects, renderer, state.profile, state.project, state.projectProfiles, state.scopeKind],
   );
 
   const handleSubmit = useCallback(
@@ -392,13 +540,13 @@ function App() {
         setInputKey();
         return;
       }
-      if (!state.profile) {
+      if (!canChat(state)) {
         dispatch({
           type: "add-block",
           block: {
             id: uid("err"),
             kind: "error",
-            message: "Connect a database first: /profile new  or  /use <name>",
+            message: "Connect first: /profile new, /use <name>, or /project use <name>",
           },
         });
         dispatch({ type: "set-input", value: "", ghost: "" });
@@ -407,7 +555,7 @@ function App() {
       }
       await runQuestion(trimmed);
     },
-    [handleSlash, runQuestion, state.profile],
+    [handleSlash, runQuestion, state],
   );
 
   useEffect(() => {
@@ -424,7 +572,13 @@ function App() {
         dispatch({ type: "clear" });
       },
       onRefresh: () => {
-        if (state.profile) refreshSchema(state.profile).catch(console.error);
+        if (state.scopeKind === "profile" && state.profile) {
+          refreshSchema(state.profile).catch(console.error);
+        } else if (state.scopeKind === "project") {
+          for (const p of state.projectProfiles) {
+            refreshSchema(p).catch(console.error);
+          }
+        }
       },
       onQuit: () => renderer.destroy(),
       onAcceptGhost: () => {
@@ -433,7 +587,7 @@ function App() {
         }
       },
     });
-  }, [renderer, state.profile, acceptSlashSuggestion]);
+  }, [renderer, state.scopeKind, state.profile, state.projectProfiles, acceptSlashSuggestion]);
 
   useKeyboard((key) => {
     if (showSlashMenu) {
@@ -459,6 +613,10 @@ function App() {
       return;
     }
 
+    if (state.projectSetupOpen && key.name === "escape") {
+      dispatch({ type: "set-project-setup", open: false });
+      return;
+    }
     if (state.profileSetupOpen && key.name === "escape") {
       dispatch({ type: "set-profile-setup", open: false });
       return;
@@ -478,13 +636,13 @@ function App() {
   });
 
   useEffect(() => {
-    const ghost = computeGhost(state.input, profiles, tables);
+    const ghost = computeGhost(state.input, profiles, tables, projects);
     if (ghost !== state.ghost) {
       dispatch({ type: "set-input", value: state.input, ghost });
     }
-  }, [state.input, profiles, tables]);
+  }, [state.input, profiles, tables, projects]);
 
-  const showTranscript = !!state.profile || state.blocks.length > 0;
+  const showTranscript = canChat(state) || state.blocks.length > 0;
 
   return (
     <box
@@ -496,7 +654,14 @@ function App() {
         backgroundColor: theme.bg,
       }}
     >
-      <StatusStrip profile={state.profile} mode={state.mode} model={state.model} />
+      <StatusStrip
+        scopeKind={state.scopeKind}
+        profile={state.profile}
+        project={state.project}
+        projectProfileCount={state.projectProfiles.length}
+        mode={state.mode}
+        model={state.model}
+      />
       <box
         style={{
           flexGrow: 1,
@@ -530,9 +695,9 @@ function App() {
           inputKey={inputKey}
           slashActive={showSlashMenu}
           placeholder={
-            state.profile
+            canChat(state)
               ? undefined
-              : "Type /profile new or /use <name> — chat disabled until connected"
+              : "Type /profile new, /use <name>, or /project use <name>"
           }
           onChange={(v) => dispatch({ type: "set-input", value: v, ghost: state.ghost })}
           onSubmit={handleSubmit}
@@ -548,7 +713,29 @@ function App() {
           onClose={() => dispatch({ type: "set-palette", open: false })}
         />
       )}
-      {state.helpOpen && <HelpOverlay hasProfile={!!state.profile} />}
+      {state.helpOpen && (
+        <HelpOverlay hasProfile={canChat(state)} scopeKind={state.scopeKind} />
+      )}
+      {state.projectSetupOpen && (
+        <ProjectSetupOverlay
+          onComplete={(name, memberProfiles) => {
+            chatHistoryRef.current = [];
+            dispatch({ type: "clear" });
+            dispatch({ type: "set-project", project: name, profiles: memberProfiles });
+            dispatch({ type: "set-project-setup", open: false });
+            dispatch({
+              type: "add-block",
+              block: {
+                id: uid("ans"),
+                kind: "answer",
+                content: `Project **${name}** ready (${memberProfiles.join(", ")}). Ask cross-database questions — agent picks profile per query.`,
+                streaming: false,
+              },
+            });
+          }}
+          onCancel={() => dispatch({ type: "set-project-setup", open: false })}
+        />
+      )}
       {state.profileSetupOpen && (
         <ProfileSetupOverlay
           onComplete={(name, database) => {

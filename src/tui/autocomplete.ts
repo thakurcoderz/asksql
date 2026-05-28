@@ -1,6 +1,7 @@
 import {
   MODE_COMMAND_DEFS,
   PROFILE_COMMAND_DEFS,
+  PROJECT_COMMAND_DEFS,
   SLASH_COMMAND_DEFS,
   slashInsertValue,
   type SlashCommandDef,
@@ -47,6 +48,7 @@ export function getSlashSuggestions(
   input: string,
   profiles: string[],
   tables: string[],
+  projects: string[] = [],
 ): SlashSuggestion[] {
   const parsed = parseSlashInput(input);
   if (!parsed) return [];
@@ -64,6 +66,41 @@ export function getSlashSuggestions(
     const partial = arg.toLowerCase();
     return PROFILE_COMMAND_DEFS.filter((d) => d.match.startsWith(partial)).map((d) =>
       suggestionFromDef(d, "/profile"),
+    );
+  }
+
+  if (cmd === "/project") {
+    const parts = arg.split(/\s+/);
+    const sub = parts[0]?.toLowerCase() ?? "";
+    if (parts.length === 1 && !arg.includes(" ")) {
+      return PROJECT_COMMAND_DEFS.filter((d) => d.match.startsWith(sub)).map((d) =>
+        suggestionFromDef(d, "/project"),
+      );
+    }
+    if (sub === "use" && parts[1] !== undefined) {
+      const partial = parts.slice(1).join(" ").toLowerCase();
+      return projects
+        .filter((p) => p.toLowerCase().startsWith(partial))
+        .map((p) => ({
+          value: `/project use ${p}`,
+          label: `/project use ${p}`,
+          command: `/project use ${p}`,
+          description: "switch to project chat",
+        }));
+    }
+    if (sub === "add" && parts[1] !== undefined) {
+      const partial = parts.slice(1).join(" ").toLowerCase();
+      return profiles
+        .filter((p) => p.toLowerCase().startsWith(partial))
+        .map((p) => ({
+          value: `/project add ${p}`,
+          label: `/project add ${p}`,
+          command: `/project add ${p}`,
+          description: "add profile to project",
+        }));
+    }
+    return PROJECT_COMMAND_DEFS.filter((d) => d.match.startsWith(sub)).map((d) =>
+      suggestionFromDef(d, "/project"),
     );
   }
 
@@ -107,10 +144,15 @@ export function shouldShowSlashMenu(input: string, suggestions: SlashSuggestion[
   return true;
 }
 
-export function computeGhost(input: string, profiles: string[], tables: string[]): string {
+export function computeGhost(
+  input: string,
+  profiles: string[],
+  tables: string[],
+  projects: string[] = [],
+): string {
   if (!input.startsWith("/")) return "";
 
-  const suggestions = getSlashSuggestions(input, profiles, tables);
+  const suggestions = getSlashSuggestions(input, profiles, tables, projects);
   if (shouldShowSlashMenu(input, suggestions)) return "";
 
   const parts = input.split(/\s+/);
@@ -141,6 +183,18 @@ export function computeGhost(input: string, profiles: string[], tables: string[]
     if (match && match.match !== partial) return `/profile ${match.cmd}`;
     const profile = profiles.find((p) => p.toLowerCase().startsWith(partial));
     return profile && profile !== parts[1] ? `/use ${profile}` : "";
+  }
+
+  if (cmd === "/project" && parts.length === 2) {
+    const partial = parts[1]!.toLowerCase();
+    const match = PROJECT_COMMAND_DEFS.find((d) => d.match.startsWith(partial));
+    if (match && match.match !== partial) return `/project ${match.cmd}${match.needsArg ? " " : ""}`;
+  }
+
+  if (cmd === "/project" && parts.length === 3 && parts[1] === "use") {
+    const partial = parts[2]!.toLowerCase();
+    const match = projects.find((p) => p.toLowerCase().startsWith(partial));
+    return match && match !== parts[2] ? `/project use ${match}` : "";
   }
 
   if (cmd === "/schema" && parts.length === 2) {

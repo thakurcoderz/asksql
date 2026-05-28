@@ -13,7 +13,7 @@ import {
   connectionEnvPath,
   memoryPath,
   profileDir,
-  PROFILES_DIR,
+  profilesDir,
   schemaPath,
 } from "../paths.ts";
 import type { DbConfig } from "../../shared/types.ts";
@@ -50,8 +50,8 @@ export function formatConnectionEnv(config: DbConfig): string {
 }
 
 export function listProfiles(): string[] {
-  if (!existsSync(PROFILES_DIR)) return [];
-  return readdirSync(PROFILES_DIR, { withFileTypes: true })
+  if (!existsSync(profilesDir())) return [];
+  return readdirSync(profilesDir(), { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => d.name)
     .sort();

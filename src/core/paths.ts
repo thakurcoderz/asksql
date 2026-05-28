@@ -14,21 +14,38 @@ export function resolveAppHome(): string {
   return DEFAULT_HOME;
 }
 
-export const APP_HOME = resolveAppHome();
-export const ASKSQL_HOME = APP_HOME;
-/** @deprecated Use APP_HOME / ASKSQL_HOME */
-export const DBAI_HOME = APP_HOME;
+export function appHome(): string {
+  return resolveAppHome();
+}
 
-export const ASKSQL_ENV = join(APP_HOME, ".env");
-/** @deprecated Use ASKSQL_ENV */
-export const DBAI_ENV = ASKSQL_ENV;
+export function asksqlEnvPath(): string {
+  return join(appHome(), ".env");
+}
 
-export const CONFIG_PATH = join(APP_HOME, "config.toml");
-export const PROFILES_DIR = join(APP_HOME, "profiles");
+export function configPath(): string {
+  return join(appHome(), "config.toml");
+}
+
+export function profilesDir(): string {
+  return join(appHome(), "profiles");
+}
+
+export function projectsDir(): string {
+  return join(appHome(), "projects");
+}
+
 export const LEGACY_DBAI_HOME = LEGACY_HOME;
 
+export function projectDir(name: string): string {
+  return join(projectsDir(), name);
+}
+
+export function projectTomlPath(name: string): string {
+  return join(projectDir(name), "project.toml");
+}
+
 export function profileDir(name: string): string {
-  return join(PROFILES_DIR, name);
+  return join(profilesDir(), name);
 }
 
 export function connectionEnvPath(name: string): string {

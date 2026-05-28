@@ -5,7 +5,10 @@ import type {
 } from "../../shared/types.ts";
 
 export interface AppState {
+  scopeKind: "profile" | "project" | "none";
   profile: string | null;
+  project: string | null;
+  projectProfiles: string[];
   database: string;
   mode: SafetyMode;
   model: string;
@@ -19,6 +22,7 @@ export interface AppState {
   confirm: ConfirmRequest | null;
   inspectorOpen: boolean;
   profileSetupOpen: boolean;
+  projectSetupOpen: boolean;
 }
 
 export type AppAction =
@@ -30,6 +34,11 @@ export type AppAction =
   | { type: "set-mode"; mode: SafetyMode }
   | { type: "set-model"; model: string }
   | { type: "set-profile"; profile: string; database: string }
+  | {
+      type: "set-project";
+      project: string;
+      profiles: string[];
+    }
   | { type: "add-block"; block: TranscriptBlock }
   | { type: "sync-thinking" }
   | { type: "clear-thinking" }
@@ -43,11 +52,18 @@ export type AppAction =
   | { type: "toggle-help" }
   | { type: "set-confirm"; confirm: ConfirmRequest | null }
   | { type: "set-profile-setup"; open: boolean }
+  | { type: "set-project-setup"; open: boolean }
   | { type: "toggle-inspector" };
 
 let nextId = 1;
 export function uid(prefix = "b"): string {
   return `${prefix}-${nextId++}`;
+}
+
+export function canChat(state: AppState): boolean {
+  if (state.scopeKind === "profile") return !!state.profile;
+  if (state.scopeKind === "project") return state.projectProfiles.length > 0;
+  return false;
 }
 
 export function appReducer(state: AppState, action: AppAction): AppState {
@@ -75,7 +91,23 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "set-model":
       return { ...state, model: action.model };
     case "set-profile":
-      return { ...state, profile: action.profile, database: action.database };
+      return {
+        ...state,
+        scopeKind: "profile",
+        profile: action.profile,
+        project: null,
+        projectProfiles: [],
+        database: action.database,
+      };
+    case "set-project":
+      return {
+        ...state,
+        scopeKind: "project",
+        profile: null,
+        project: action.project,
+        projectProfiles: action.profiles,
+        database: "",
+      };
     case "add-block": {
       const withoutThinking =
         action.block.kind === "thinking"
@@ -83,13 +115,14 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           : state.blocks.filter((b) => b.kind !== "thinking");
       return { ...state, blocks: [...withoutThinking, action.block] };
     }
-    case "sync-thinking": {
-      const without = state.blocks.filter((b) => b.kind !== "thinking");
+    case "sync-thinking":
       return {
         ...state,
-        blocks: [...without, { id: "thinking", kind: "thinking" }],
+        blocks: [
+          ...state.blocks.filter((b) => b.kind !== "thinking"),
+          { id: "thinking", kind: "thinking" },
+        ],
       };
-    }
     case "clear-thinking":
       return { ...state, blocks: state.blocks.filter((b) => b.kind !== "thinking") };
     case "update-block":
@@ -134,6 +167,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, confirm: action.confirm };
     case "set-profile-setup":
       return { ...state, profileSetupOpen: action.open };
+    case "set-project-setup":
+      return { ...state, projectSetupOpen: action.open };
     case "toggle-inspector":
       return { ...state, inspectorOpen: !state.inspectorOpen };
     default:

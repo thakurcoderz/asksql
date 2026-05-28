@@ -97,6 +97,7 @@ export function Transcript(props: {
                   key={block.id}
                   tool={block.tool}
                   sql={block.sql}
+                  profile={block.profile}
                   result={block.result}
                   writeResult={block.writeResult}
                   error={block.error}

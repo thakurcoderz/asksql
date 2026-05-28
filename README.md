@@ -73,7 +73,31 @@ Commands are grouped by what you’re doing: **chat** vs **database** vs **sessi
 | `/help` | Show shortcuts |
 | `/quit` | Exit |
 
-**Tip:** `/new` starts a fresh conversation on the **same** database. `/use other_db` switches DB and also starts fresh. Chat is blocked until `/profile new` or `/use <name>`.
+**Tip:** `/new` starts a fresh conversation on the **same** database. `/use other_db` switches DB and also starts fresh. Chat is blocked until `/profile new`, `/use <name>`, or `/project use <name>`.
+
+### Projects (multi-database chat)
+
+Group several profiles under one **project** to ask cross-database questions in a single chat. The agent sees schema summaries for every profile in the project (higher token usage per turn).
+
+| Command | Action |
+|---------|--------|
+| `/project new` | Create a project from existing profiles |
+| `/project list` | List projects and member profiles |
+| `/project use <name>` | Switch to project mode (+ new chat) |
+| `/project add <profile>` | Add profile to active project |
+
+CLI:
+
+```bash
+asksql project list
+asksql project new trualta demo analytics
+asksql project use trualta
+```
+
+**Scenario 1 (single profile):** `/use demo` — one DB, lowest cost.  
+**Scenario 2 (project):** `/project use trualta` — agent queries multiple DBs; each tool call must specify `profile`. Max 8 profiles per project.
+
+When a project has more than 3 profiles, the status bar shows `↑tokens` as a cost reminder.
 
 | Key | Action |
 |-----|--------|
@@ -98,7 +122,7 @@ Default mode comes from `ASKSQL_MODE` (or legacy `DBAI_MODE`) or `~/.asksql/conf
 
 **Global config** — `~/.asksql/config.toml` (or legacy `~/.dbai/config.toml`)
 
-- `default_model`, `default_mode`, `active_profile`
+- `default_model`, `default_mode`, `active_profile`, `active_project`
 
 **Per-database profile** — `~/.asksql/profiles/{database}/`
 
@@ -108,6 +132,14 @@ Default mode comes from `ASKSQL_MODE` (or legacy `DBAI_MODE`) or `~/.asksql/conf
 | `schema.json` | Cached introspection (refreshed on demand) |
 | `memory.md` | Agent notes appended across sessions |
 | `history.jsonl` | Optional session history |
+
+**Project** — `~/.asksql/projects/{name}/project.toml`
+
+| Field | Purpose |
+|-------|---------|
+| `name` | Project identifier |
+| `description` | Optional note |
+| `profiles` | List of profile names in this project |
 
 Existing **dbai** users keep profiles under `~/.dbai/` automatically until you migrate:
 

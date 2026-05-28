@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
-import { ASKSQL_ENV, getInstallRoot } from "./paths.ts";
+import { asksqlEnvPath, getInstallRoot } from "./paths.ts";
 import type { SafetyMode } from "../shared/types.ts";
 
 const ENV_ALIASES: Record<string, string> = {
@@ -72,7 +72,7 @@ export function loadEnvCascade(cwd = process.cwd()): void {
   }
 
   loadEnvFile(join(getInstallRoot(), ".env"));
-  loadEnvFile(ASKSQL_ENV);
+  loadEnvFile(asksqlEnvPath());
 }
 
 export function requireOpenRouterKey(): string {

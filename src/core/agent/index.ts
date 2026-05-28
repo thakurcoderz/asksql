@@ -1,8 +1,9 @@
-import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
+import { readFileSync, writeFileSync, appendFileSync, existsSync } from "node:fs";
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat/completions";
 import type {
   AgentEvent,
+  AgentScope,
   SafetyMode,
   Schema,
   SqlReadResult,
@@ -14,6 +15,7 @@ import {
   MAX_RESULT_BYTES,
   DEFAULT_READ_LIMIT,
   MAX_CHAT_HISTORY,
+  MAX_PROJECT_MEMORY_CHARS,
 } from "../../shared/types.ts";
 import { memoryPath, schemaPath, historyPath } from "../paths.ts";
 import { loadProfileConfig } from "../profiles/index.ts";
@@ -30,12 +32,17 @@ import {
 import type { RowDataPacket } from "mysql2/promise";
 
 export interface AgentContext {
-  profileName: string;
+  scope: AgentScope;
   mode: SafetyMode;
   model: string;
   onEvent: (event: AgentEvent) => void;
   onConfirm?: (reason: string, sql: string) => Promise<boolean>;
 }
+
+const PROFILE_PARAM = {
+  type: "string" as const,
+  description: "Profile name (required in project mode)",
+};
 
 const TOOLS: ChatCompletionTool[] = [
   {
@@ -47,6 +54,7 @@ const TOOLS: ChatCompletionTool[] = [
         type: "object",
         properties: {
           table: { type: "string", description: "Optional table name" },
+          profile: PROFILE_PARAM,
         },
       },
     },
@@ -60,6 +68,7 @@ const TOOLS: ChatCompletionTool[] = [
         type: "object",
         properties: {
           query: { type: "string" },
+          profile: PROFILE_PARAM,
         },
         required: ["query"],
       },
@@ -74,6 +83,7 @@ const TOOLS: ChatCompletionTool[] = [
         type: "object",
         properties: {
           query: { type: "string" },
+          profile: PROFILE_PARAM,
         },
         required: ["query"],
       },
@@ -89,6 +99,7 @@ const TOOLS: ChatCompletionTool[] = [
         properties: {
           section: { type: "string" },
           content: { type: "string" },
+          profile: PROFILE_PARAM,
         },
         required: ["section", "content"],
       },
@@ -100,19 +111,40 @@ function loadSchema(profileName: string): Schema {
   return JSON.parse(readFileSync(schemaPath(profileName), "utf8")) as Schema;
 }
 
-function buildSystemPrompt(profileName: string, mode: SafetyMode): string {
+function truncateMemory(content: string, maxChars: number): string {
+  if (content.length <= maxChars) return content;
+  return content.slice(0, maxChars) + "\n… (memory truncated for project mode)";
+}
+
+function modeDescription(mode: SafetyMode): string {
+  if (mode === "safe") return "safe mode: READ only; writes denied";
+  if (mode === "confirm") return "confirm mode: READ allowed; WRITE/DDL requires user confirmation";
+  return "yolo mode: READ and WRITE/DDL allowed without confirmation";
+}
+
+function buildProfileSection(profileName: string, memoryCap?: number): string {
   const schema = loadSchema(profileName);
-  const memory = readFileSync(memoryPath(profileName), "utf8");
+  const memoryRaw = readFileSync(memoryPath(profileName), "utf8");
+  const memory = memoryCap ? truncateMemory(memoryRaw, memoryCap) : memoryRaw;
   const index = schema.tables.map((t) => schemaIndexLine(t)).join("\n");
+  return `### Profile: ${profileName} (database: ${schema.database})
 
-  const modeDesc =
-    mode === "safe"
-      ? "safe mode: READ only; writes denied"
-      : mode === "confirm"
-        ? "confirm mode: READ allowed; WRITE/DDL requires user confirmation"
-        : "yolo mode: READ and WRITE/DDL allowed without confirmation";
+Schema index:
+${index}
 
-  return `You are a MySQL data assistant for database "${schema.database}".
+Memory (memory.md):
+${memory}`;
+}
+
+export function buildSystemPrompt(scope: AgentScope, mode: SafetyMode): string {
+  const modeDesc = modeDescription(mode);
+
+  if (scope.kind === "profile") {
+    const schema = loadSchema(scope.profileName);
+    const memory = readFileSync(memoryPath(scope.profileName), "utf8");
+    const index = schema.tables.map((t) => schemaIndexLine(t)).join("\n");
+
+    return `You are a MySQL data assistant for database "${schema.database}".
 Safety mode: ${modeDesc}
 
 Schema index:
@@ -128,6 +160,49 @@ Rules:
 - Query results render inline in the UI as tables. Never repeat row data in your answer: no lists, tables, or "here are N rows" preambles. Only add interpretation, caveats, or next steps in 1-3 sentences.
 - Use the conversation history for follow-up messages (e.g. "that are caregivers" refers to the previous question).
 - Prefer a single run_sql_read query per turn when possible. Use inspect_schema first instead of a exploratory SELECT you will replace.`;
+  }
+
+  const profileList = scope.profileNames.join(", ");
+  const sections = scope.profileNames
+    .map((p) => buildProfileSection(p, MAX_PROJECT_MEMORY_CHARS))
+    .join("\n\n");
+
+  return `You are a MySQL data assistant for project "${scope.projectName}" with ${scope.profileNames.length} database profile(s): ${profileList}.
+Safety mode: ${modeDesc}
+
+This is PROJECT mode. Each profile is a separate MySQL database. Cross-database joins in one SQL call are NOT supported.
+
+${sections}
+
+Rules:
+- Every tool call MUST include the "profile" parameter naming which profile to use (${profileList}).
+- Never invent columns; use inspect_schema with the correct profile first if unsure.
+- Default to LIMIT N for exploratory reads.
+- When the user teaches you something, call update_memory with the appropriate profile.
+- Query results render inline in the UI as tables. Never repeat row data in your answer.
+- Use conversation history for follow-ups; disambiguate which profile when the user refers to "the other database".`;
+}
+
+export function resolveToolProfile(
+  scope: AgentScope,
+  args: Record<string, unknown>,
+): string | { error: string } {
+  if (scope.kind === "profile") {
+    return scope.profileName;
+  }
+
+  const profile = args.profile as string | undefined;
+  if (!profile) {
+    return {
+      error: `profile parameter required in project mode. Available: ${scope.profileNames.join(", ")}`,
+    };
+  }
+  if (!scope.profileNames.includes(profile)) {
+    return {
+      error: `Profile '${profile}' is not in this project. Available: ${scope.profileNames.join(", ")}`,
+    };
+  }
+  return profile;
 }
 
 function createClient(): OpenAI {
@@ -208,6 +283,7 @@ async function runSqlRead(profileName: string, query: string): Promise<SqlReadRe
 
 async function runSqlWrite(
   ctx: AgentContext,
+  profileName: string,
   query: string,
 ): Promise<{ ok: boolean; rowcount?: number; error?: string }> {
   const kind = classifySql(query);
@@ -223,7 +299,7 @@ async function runSqlWrite(
     if (!approved) return { ok: false, error: "user declined" };
   }
 
-  const config = loadProfileConfig(ctx.profileName);
+  const config = loadProfileConfig(profileName);
   const conn = await createConnection(config);
   try {
     const rowcount = await executeWrite(conn, query);
@@ -247,35 +323,53 @@ async function executeTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
+  const resolved = resolveToolProfile(ctx.scope, args);
+  if (typeof resolved !== "string") return resolved;
+
+  const profileName = resolved;
+
   switch (name) {
     case "inspect_schema": {
       const table = args.table as string | undefined;
-      const result = await runInspectSchema(ctx.profileName, table);
+      const result = await runInspectSchema(profileName, table);
       if (!table && "tables" in (result as object)) {
         const tables = (result as { tables: { name: string }[] }).tables.map((t) => t.name);
-        ctx.onEvent({ type: "schema", tables });
+        ctx.onEvent({ type: "schema", tables, profile: profileName });
       } else if (table) {
-        ctx.onEvent({ type: "schema", tables: [table] });
+        ctx.onEvent({ type: "schema", tables: [table], profile: profileName });
       }
       return result;
     }
     case "run_sql_read": {
       const query = String(args.query ?? "");
-      const result = await runSqlRead(ctx.profileName, query);
+      const result = await runSqlRead(profileName, query);
       if ("error" in result) {
-        ctx.onEvent({ type: "execution", tool: "run_sql_read", sql: query, error: result.error });
+        ctx.onEvent({
+          type: "execution",
+          tool: "run_sql_read",
+          sql: query,
+          profile: profileName,
+          error: result.error,
+        });
       } else {
-        ctx.onEvent({ type: "execution", tool: "run_sql_read", sql: query, result });
+        ctx.onEvent({
+          type: "execution",
+          tool: "run_sql_read",
+          sql: query,
+          profile: profileName,
+          result,
+        });
       }
       return result;
     }
     case "run_sql_write": {
       const query = String(args.query ?? "");
-      const result = await runSqlWrite(ctx, query);
+      const result = await runSqlWrite(ctx, profileName, query);
       ctx.onEvent({
         type: "execution",
         tool: "run_sql_write",
         sql: query,
+        profile: profileName,
         writeResult: result,
         error: result.error,
       });
@@ -284,13 +378,18 @@ async function executeTool(
     case "update_memory": {
       const section = String(args.section ?? "");
       const content = String(args.content ?? "");
-      const result = await runUpdateMemory(ctx.profileName, section, content);
-      ctx.onEvent({ type: "memory", section });
+      const result = await runUpdateMemory(profileName, section, content);
+      ctx.onEvent({ type: "memory", section, profile: profileName });
       return result;
     }
     default:
       return { error: `Unknown tool: ${name}` };
   }
+}
+
+function historyProfileForScope(scope: AgentScope): string {
+  if (scope.kind === "profile") return scope.profileName;
+  return scope.profileNames[0]!;
 }
 
 export async function runAgentTurn(
@@ -304,7 +403,7 @@ export async function runAgentTurn(
     .map((t) => ({ role: t.role, content: t.content }));
 
   const messages: ChatCompletionMessageParam[] = [
-    { role: "system", content: buildSystemPrompt(ctx.profileName, ctx.mode) },
+    { role: "system", content: buildSystemPrompt(ctx.scope, ctx.mode) },
     ...historyMessages,
     { role: "user", content: userMessage },
   ];
@@ -399,11 +498,19 @@ export async function runAgentTurn(
     throw new Error(err);
   }
 
+  const logProfile = historyProfileForScope(ctx.scope);
   try {
-    appendFileSync(
-      historyPath(ctx.profileName),
-      JSON.stringify({ ts: new Date().toISOString(), q: userMessage, a: finalAnswer }) + "\n",
-    );
+    if (existsSync(historyPath(logProfile))) {
+      appendFileSync(
+        historyPath(logProfile),
+        JSON.stringify({ ts: new Date().toISOString(), q: userMessage, a: finalAnswer }) + "\n",
+      );
+    } else {
+      appendFileSync(
+        historyPath(logProfile),
+        JSON.stringify({ ts: new Date().toISOString(), q: userMessage, a: finalAnswer }) + "\n",
+      );
+    }
   } catch {
     // history is optional
   }

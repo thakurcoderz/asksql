@@ -1,14 +1,21 @@
 #!/usr/bin/env bun
 import { defineCommand, runMain } from "citty";
 import { loadEnvCascade, requireOpenRouterKey, getModel, getDefaultMode } from "../core/env.ts";
-import { loadConfig, saveConfig, setActiveProfile } from "../core/config.ts";
+import { loadConfig, setActiveProfile, setActiveProject, resolveActiveScope, scopeToAgentScope } from "../core/config.ts";
 import {
   listProfiles,
   removeProfile,
   renameProfile,
-  resolveActiveProfile,
   profileExists,
 } from "../core/profiles/index.ts";
+import {
+  listProjects,
+  createProject,
+  projectExists,
+  loadProject,
+  addProfileToProject,
+  removeProject,
+} from "../core/projects/index.ts";
 import { promptNewProfile } from "./new.ts";
 import { installAlias } from "./alias.ts";
 import { runAsk } from "./ask.ts";
@@ -43,7 +50,7 @@ const main = defineCommand({
       },
     }),
     connect: defineCommand({
-      meta: { description: "Switch active profile" },
+      meta: { description: "Switch active profile (clears active project)" },
       args: { name: { type: "positional", required: true } },
       run: async ({ args }) => {
         loadEnvCascade();
@@ -101,20 +108,92 @@ const main = defineCommand({
         console.log(`Renamed '${args.old}' → '${args.new}'`);
       },
     }),
+    project: defineCommand({
+      meta: { description: "Manage multi-profile projects" },
+      subCommands: {
+        list: defineCommand({
+          meta: { description: "List projects" },
+          run: async () => {
+            loadEnvCascade();
+            requireOpenRouterKey();
+            const active = loadConfig().active_project;
+            for (const name of listProjects()) {
+              const proj = loadProject(name);
+              const marker = name === active ? " *" : "";
+              console.log(`${name}${marker}: ${proj.profiles.join(", ")}`);
+            }
+          },
+        }),
+        new: defineCommand({
+          meta: { description: "Create a project with one or more profiles" },
+          args: {
+            name: { type: "positional", required: true },
+            profiles: { type: "positional", required: true, description: "Space-separated profile names" },
+          },
+          run: async ({ args }) => {
+            loadEnvCascade();
+            requireOpenRouterKey();
+            const name = String(args.name);
+            const profiles = String(args.profiles).split(/\s+/).filter(Boolean);
+            createProject(name, profiles);
+            console.log(`Project '${name}' created: ${profiles.join(", ")}`);
+          },
+        }),
+        add: defineCommand({
+          meta: { description: "Add a profile to a project" },
+          args: {
+            project: { type: "positional", required: true },
+            profile: { type: "positional", required: true },
+          },
+          run: async ({ args }) => {
+            loadEnvCascade();
+            requireOpenRouterKey();
+            addProfileToProject(String(args.project), String(args.profile));
+            console.log(`Added '${args.profile}' to project '${args.project}'`);
+          },
+        }),
+        use: defineCommand({
+          meta: { description: "Switch to project mode" },
+          args: { name: { type: "positional", required: true } },
+          run: async ({ args }) => {
+            loadEnvCascade();
+            requireOpenRouterKey();
+            const name = String(args.name);
+            if (!projectExists(name)) {
+              console.error(`Project '${name}' not found`);
+              process.exit(1);
+            }
+            setActiveProject(name);
+            const proj = loadProject(name);
+            console.log(`Active project: ${name} (${proj.profiles.join(", ")})`);
+          },
+        }),
+        remove: defineCommand({
+          meta: { description: "Remove a project" },
+          args: { name: { type: "positional", required: true } },
+          run: async ({ args }) => {
+            loadEnvCascade();
+            requireOpenRouterKey();
+            removeProject(String(args.name));
+            console.log(`Removed project '${args.name}'`);
+          },
+        }),
+      },
+    }),
     ask: defineCommand({
       meta: { description: "One-shot question (non-interactive)" },
       args: { question: { type: "positional", required: true } },
       run: async ({ args }) => {
         loadEnvCascade();
         requireOpenRouterKey();
-        const profile = resolveActiveProfile();
-        if (!profile) {
-          console.error("No active profile. Run asksql and use /new or /connect <name>");
+        const scope = resolveActiveScope();
+        if (!scope) {
+          console.error("No active profile or project. Use connect or project use");
           process.exit(1);
         }
         const config = loadConfig();
         await runAsk({
-          profile,
+          scope: scopeToAgentScope(scope),
           question: String(args.question),
           mode: config.default_mode ?? getDefaultMode(),
           model: getModel(),
