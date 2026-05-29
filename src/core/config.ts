@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { parse, stringify } from "smol-toml";
 import { APP_HOME, CONFIG_PATH } from "./paths.ts";
 import type { AppConfig, SafetyMode } from "../shared/types.ts";
@@ -10,7 +10,10 @@ const DEFAULTS: AppConfig = {
 };
 
 export function ensureDbaiHome(): void {
-  if (!existsSync(APP_HOME)) mkdirSync(APP_HOME, { recursive: true });
+  if (!existsSync(APP_HOME)) {
+    // App home stores credentials and config; keep it owner-only.
+    mkdirSync(APP_HOME, { recursive: true, mode: 0o700 });
+  }
 }
 
 export function loadConfig(): AppConfig {

@@ -17,7 +17,7 @@ import {
 } from "../../shared/types.ts";
 import { memoryPath, schemaPath, historyPath } from "../paths.ts";
 import { loadProfileConfig } from "../profiles/index.ts";
-import { createConnection, executeWrite, queryRows } from "../mysql.ts";
+import { createConnection, executeWrite, queryRowsReadOnly } from "../mysql.ts";
 import { introspectSchema, schemaIndexLine, columnsSummary } from "../schema/introspect.ts";
 import { appendMemorySection } from "../memory.ts";
 import {
@@ -167,7 +167,7 @@ async function runSqlRead(profileName: string, query: string): Promise<SqlReadRe
   const config = loadProfileConfig(profileName);
   const conn = await createConnection(config);
   try {
-    const rows = await queryRows<RowDataPacket>(conn, limited);
+    const rows = await queryRowsReadOnly<RowDataPacket>(conn, limited);
     const columns = rows.length > 0 ? Object.keys(rows[0]!) : [];
     const serialized: Record<string, unknown>[] = [];
     let bytes = 0;

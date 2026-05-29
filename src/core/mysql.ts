@@ -24,6 +24,31 @@ export async function queryRows<T extends RowDataPacket>(
   return rows;
 }
 
+/**
+ * Run a query inside a `READ ONLY` transaction. MySQL rejects any data- or
+ * schema-modifying statement in such a transaction ("Cannot execute statement
+ * in a READ ONLY transaction"), giving a database-enforced guarantee that does
+ * not depend on the SQL classifier being perfect. Used for the agent's
+ * read-only tool so a misclassified write can never mutate data.
+ */
+export async function queryRowsReadOnly<T extends RowDataPacket>(
+  conn: Connection,
+  sql: string,
+  params: unknown[] = [],
+): Promise<T[]> {
+  await conn.query("START TRANSACTION READ ONLY");
+  try {
+    const [rows] = await conn.query<T[]>(sql, params);
+    return rows;
+  } finally {
+    try {
+      await conn.query("ROLLBACK");
+    } catch {
+      // best-effort cleanup; connection is closed by the caller regardless
+    }
+  }
+}
+
 export async function executeWrite(conn: Connection, sql: string): Promise<number> {
   const [result] = await conn.query(sql);
   const info = result as { affectedRows?: number };

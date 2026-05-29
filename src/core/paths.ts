@@ -27,7 +27,34 @@ export const CONFIG_PATH = join(APP_HOME, "config.toml");
 export const PROFILES_DIR = join(APP_HOME, "profiles");
 export const LEGACY_DBAI_HOME = LEGACY_HOME;
 
+/**
+ * Profile names become directory names under PROFILES_DIR, so they must never
+ * contain path separators or traversal sequences. Without this guard a name
+ * like "../../etc" would let profile operations (notably the recursive
+ * removeProfile) read, write, or delete arbitrary paths outside the app home.
+ */
+const VALID_PROFILE_NAME = /^[A-Za-z0-9_.-]+$/;
+
+export function isValidProfileName(name: string): boolean {
+  if (typeof name !== "string") return false;
+  if (name.length === 0 || name.length > 64) return false;
+  if (name === "." || name === "..") return false;
+  if (name.includes("..")) return false;
+  if (name.includes("/") || name.includes("\\")) return false;
+  if (name.includes("\0")) return false;
+  return VALID_PROFILE_NAME.test(name);
+}
+
+export function assertValidProfileName(name: string): void {
+  if (!isValidProfileName(name)) {
+    throw new Error(
+      `Invalid profile name '${name}'. Use only letters, numbers, '.', '_' and '-' (no path separators).`,
+    );
+  }
+}
+
 export function profileDir(name: string): string {
+  assertValidProfileName(name);
   return join(PROFILES_DIR, name);
 }
 
