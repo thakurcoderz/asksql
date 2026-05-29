@@ -1,8 +1,9 @@
-import { theme, syntaxStyle } from "../theme.ts";
-import type { SqlReadResult } from "../../shared/types.ts";
+import { theme, syntaxStyle, modeColor } from "../theme.ts";
+import type { SqlReadResult, SafetyMode } from "../../shared/types.ts";
 import { ResultTable } from "./ResultTable.tsx";
 import { sanitizeAnswerAfterResult } from "../format/answerSanitize.ts";
 import { sqlOneLine } from "../format/resultTable.ts";
+import { formatDuration } from "../format/numbers.ts";
 
 export function ExecutionBlock(props: {
   tool: "run_sql_read" | "run_sql_write";
@@ -11,6 +12,8 @@ export function ExecutionBlock(props: {
   writeResult?: { ok: boolean; rowcount?: number; error?: string };
   error?: string;
   collapsed?: boolean;
+  durationMs?: number;
+  mode?: SafetyMode;
 }) {
   const isRead = props.tool === "run_sql_read";
   const rowLabel = props.result
@@ -18,11 +21,13 @@ export function ExecutionBlock(props: {
     : props.writeResult?.ok
       ? `${props.writeResult.rowcount ?? 0} affected`
       : "failed";
+  const timing = typeof props.durationMs === "number" ? formatDuration(props.durationMs) : null;
 
   if (props.collapsed) {
     return (
       <text fg={theme.fgDim} style={{ paddingLeft: 2, marginBottom: 1 }}>
-        ↳ {isRead ? "read" : "write"} · {rowLabel} · {sqlOneLine(props.sql, 64)}
+        ↳ {isRead ? "read" : "write"} · {rowLabel}
+        {timing ? ` · ${timing}` : ""} · {sqlOneLine(props.sql, 64)}
       </text>
     );
   }
@@ -48,8 +53,22 @@ export function ExecutionBlock(props: {
           backgroundColor: theme.bgElevated,
         }}
       >
-        <text fg={isRead ? theme.safe : theme.warn}>
-          {isRead ? "read" : "write"} · {rowLabel}
+        <text>
+          <span fg={isRead ? theme.safe : theme.warn}>{isRead ? "read" : "write"}</span>
+          <span fg={theme.fgDim}> · </span>
+          <span fg={theme.fg}>{rowLabel}</span>
+          {timing && (
+            <>
+              <span fg={theme.fgDim}> · </span>
+              <span fg={theme.fgMuted}>{timing}</span>
+            </>
+          )}
+          {props.mode && (
+            <>
+              <span fg={theme.fgDim}> · </span>
+              <span fg={modeColor(props.mode)}>{props.mode}</span>
+            </>
+          )}
         </text>
       </box>
 

@@ -2,7 +2,16 @@ import type {
   SafetyMode,
   TranscriptBlock,
   ConfirmRequest,
+  SessionStats,
 } from "../../shared/types.ts";
+
+export const EMPTY_STATS: SessionStats = {
+  queries: 0,
+  errors: 0,
+  elapsedMs: 0,
+  promptTokens: 0,
+  completionTokens: 0,
+};
 
 export interface AppState {
   profile: string | null;
@@ -19,6 +28,8 @@ export interface AppState {
   confirm: ConfirmRequest | null;
   inspectorOpen: boolean;
   profileSetupOpen: boolean;
+  stats: SessionStats;
+  schemaVersion: number;
 }
 
 export type AppAction =
@@ -43,7 +54,10 @@ export type AppAction =
   | { type: "toggle-help" }
   | { type: "set-confirm"; confirm: ConfirmRequest | null }
   | { type: "set-profile-setup"; open: boolean }
-  | { type: "toggle-inspector" };
+  | { type: "toggle-inspector" }
+  | { type: "add-stats"; patch: Partial<SessionStats> }
+  | { type: "reset-stats" }
+  | { type: "bump-schema-version" };
 
 let nextId = 1;
 export function uid(prefix = "b"): string {
@@ -136,6 +150,23 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, profileSetupOpen: action.open };
     case "toggle-inspector":
       return { ...state, inspectorOpen: !state.inspectorOpen };
+    case "add-stats": {
+      const p = action.patch;
+      return {
+        ...state,
+        stats: {
+          queries: state.stats.queries + (p.queries ?? 0),
+          errors: state.stats.errors + (p.errors ?? 0),
+          elapsedMs: state.stats.elapsedMs + (p.elapsedMs ?? 0),
+          promptTokens: state.stats.promptTokens + (p.promptTokens ?? 0),
+          completionTokens: state.stats.completionTokens + (p.completionTokens ?? 0),
+        },
+      };
+    }
+    case "reset-stats":
+      return { ...state, stats: { ...EMPTY_STATS } };
+    case "bump-schema-version":
+      return { ...state, schemaVersion: state.schemaVersion + 1 };
     default:
       return state;
   }

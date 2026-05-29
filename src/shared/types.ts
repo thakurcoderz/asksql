@@ -87,11 +87,12 @@ export interface SqlWriteResult {
 export type AgentEvent =
   | { type: "thinking" }
   | { type: "schema"; tables: string[] }
-  | { type: "execution"; tool: "run_sql_read" | "run_sql_write"; sql: string; result?: SqlReadResult; writeResult?: SqlWriteResult; error?: string }
+  | { type: "execution"; tool: "run_sql_read" | "run_sql_write"; sql: string; result?: SqlReadResult; writeResult?: SqlWriteResult; error?: string; durationMs?: number }
   | { type: "memory"; section: string }
   | { type: "answer-chunk"; content: string }
   | { type: "answer-done"; content: string }
   | { type: "answer-clear" }
+  | { type: "usage"; promptTokens: number; completionTokens: number }
   | { type: "error"; message: string }
   | { type: "done" };
 
@@ -99,10 +100,18 @@ export type TranscriptBlock =
   | { id: string; kind: "user"; text: string }
   | { id: string; kind: "thinking" }
   | { id: string; kind: "schema"; tables: { name: string; colCount: number }[] }
-  | { id: string; kind: "execution"; tool: "run_sql_read" | "run_sql_write"; sql: string; result?: SqlReadResult; writeResult?: SqlWriteResult; error?: string }
+  | { id: string; kind: "execution"; tool: "run_sql_read" | "run_sql_write"; sql: string; result?: SqlReadResult; writeResult?: SqlWriteResult; error?: string; durationMs?: number; mode?: SafetyMode }
   | { id: string; kind: "memory"; section: string }
   | { id: string; kind: "answer"; content: string; streaming: boolean }
   | { id: string; kind: "error"; message: string };
+
+export interface SessionStats {
+  queries: number;
+  errors: number;
+  elapsedMs: number;
+  promptTokens: number;
+  completionTokens: number;
+}
 
 export interface ConfirmRequest {
   id: string;
@@ -115,3 +124,10 @@ export const MAX_AGENT_STEPS = 10;
 export const MAX_RESULT_BYTES = 50_000;
 export const MAX_CELL_DISPLAY = 60;
 export const DEFAULT_READ_LIMIT = 100;
+/**
+ * Hard server-side ceiling on rows returned by a read query, enforced via
+ * SQL_SELECT_LIMIT regardless of the SQL text. This is the memory-safety net
+ * that backstops ensureLimit(), which can be skipped when the query already
+ * contains the token "LIMIT" (e.g. inside a subquery).
+ */
+export const MAX_READ_ROWS = 5_000;

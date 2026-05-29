@@ -7,6 +7,7 @@ import {
   profileExists,
   loadProfileConfig,
 } from "../core/profiles/index.ts";
+import { isValidProfileName } from "../core/paths.ts";
 
 export async function promptNewProfile(): Promise<void> {
   const rl = readline.createInterface({ input, output });
@@ -31,6 +32,12 @@ export async function promptNewProfile(): Promise<void> {
       config.database = database.trim();
       if (!config.database) {
         console.error("Database name is required.");
+        continue;
+      }
+      if (!isValidProfileName(config.database)) {
+        console.error(
+          "Database name must use only letters, numbers, '.', '_' and '-' (no path separators).",
+        );
         continue;
       }
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classifySql, gateAction, splitStatements, stripComments } from "../src/core/safety/classifier.ts";
+import { classifySql, enforceReadOnly, gateAction, splitStatements, stripComments } from "../src/core/safety/classifier.ts";
 
 describe("SQL classifier", () => {
   test("SELECT INTO OUTFILE is WRITE", () => {
@@ -16,6 +16,29 @@ describe("SQL classifier", () => {
 
   test("CTE SELECT is READ", () => {
     expect(classifySql("WITH cte AS (SELECT 1) SELECT * FROM cte")).toBe("READ");
+  });
+
+  test("CTE followed by DELETE is WRITE (not READ)", () => {
+    expect(
+      classifySql("WITH cte AS (SELECT id FROM users) DELETE FROM users WHERE id IN (SELECT id FROM cte)"),
+    ).toBe("WRITE");
+  });
+
+  test("recursive CTE followed by UPDATE is WRITE", () => {
+    expect(
+      classifySql("WITH RECURSIVE cte AS (SELECT 1) UPDATE users SET active = 0"),
+    ).toBe("WRITE");
+  });
+
+  test("CTE feeding INSERT is WRITE", () => {
+    expect(
+      classifySql("WITH cte AS (SELECT 1 AS n) INSERT INTO t (n) SELECT n FROM cte"),
+    ).toBe("WRITE");
+  });
+
+  test("enforceReadOnly rejects a CTE-wrapped DELETE", () => {
+    const r = enforceReadOnly("WITH cte AS (SELECT id FROM users) DELETE FROM users");
+    expect(r.ok).toBe(false);
   });
 
   test("SHOW TABLES is READ", () => {

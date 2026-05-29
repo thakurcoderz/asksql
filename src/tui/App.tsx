@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import { createCliRenderer } from "@opentui/core";
-import { createRoot, useKeyboard, useRenderer } from "@opentui/react";
+import { createRoot, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { getModel, getDefaultMode } from "../core/env.ts";
 import { loadConfig, saveConfig, setActiveProfile } from "../core/config.ts";
 import { ProfileSetupOverlay } from "./components/ProfileSetupOverlay.tsx";
@@ -13,11 +13,12 @@ import {
 } from "../core/profiles/index.ts";
 import { readFileSync } from "node:fs";
 import { schemaPath, memoryPath } from "../core/paths.ts";
-import type { Schema, SafetyMode, AgentEvent, ChatTurn } from "../shared/types.ts";
+import type { Schema, SafetyMode, AgentEvent, ChatTurn, DbConfig } from "../shared/types.ts";
 import { MAX_CHAT_HISTORY } from "../shared/types.ts";
 import { runAgentTurn, refreshSchema } from "../core/agent/index.ts";
-import { appReducer, uid, type AppState } from "./state/store.ts";
-import { StatusStrip } from "./components/StatusStrip.tsx";
+import { appReducer, uid, EMPTY_STATS, type AppState } from "./state/store.ts";
+import { StatusBar } from "./components/StatusBar.tsx";
+import { SchemaSidebar } from "./components/SchemaSidebar.tsx";
 import { Transcript } from "./components/Transcript.tsx";
 import { PromptBar } from "./components/PromptBar.tsx";
 import { ConfirmOverlay } from "./components/ConfirmOverlay.tsx";
@@ -27,12 +28,19 @@ import { computeGhost, getSlashSuggestions, shouldShowSlashMenu } from "./autoco
 import { theme } from "./theme.ts";
 import { setupKeymap } from "./keymap.ts";
 
-function loadSchemaTables(profile: string): string[] {
+function loadFullSchema(profile: string): Schema | null {
   try {
-    const schema = JSON.parse(readFileSync(schemaPath(profile), "utf8")) as Schema;
-    return schema.tables.map((t) => t.name);
+    return JSON.parse(readFileSync(schemaPath(profile), "utf8")) as Schema;
   } catch {
-    return [];
+    return null;
+  }
+}
+
+function safeLoadProfileConfig(profile: string): DbConfig | null {
+  try {
+    return loadProfileConfig(profile);
+  } catch {
+    return null;
   }
 }
 
@@ -57,6 +65,8 @@ function App() {
     confirm: null,
     inspectorOpen: false,
     profileSetupOpen: false,
+    stats: { ...EMPTY_STATS },
+    schemaVersion: 0,
   };
 
   const [state, dispatch] = useReducer(appReducer, initial);
@@ -67,8 +77,18 @@ function App() {
   const answerId = useRef<string | null>(null);
   const chatHistoryRef = useRef<ChatTurn[]>([]);
 
+  const { width: termWidth } = useTerminalDimensions();
   const profiles = listProfiles();
-  const tables = state.profile ? loadSchemaTables(state.profile) : [];
+
+  const fullSchema = useMemo(
+    () => (state.profile ? loadFullSchema(state.profile) : null),
+    [state.profile, state.schemaVersion],
+  );
+  const sidebarConn = useMemo(
+    () => (state.profile ? safeLoadProfileConfig(state.profile) : null),
+    [state.profile],
+  );
+  const tables = useMemo(() => fullSchema?.tables.map((t) => t.name) ?? [], [fullSchema]);
 
   const slashSuggestions = useMemo(
     () => getSlashSuggestions(state.input, profiles, tables),
@@ -129,6 +149,21 @@ function App() {
               result: event.result,
               writeResult: event.writeResult,
               error: event.error,
+              durationMs: event.durationMs,
+              mode: state.mode,
+            },
+          });
+          dispatch({
+            type: "add-stats",
+            patch: { queries: 1, errors: event.error ? 1 : 0 },
+          });
+          break;
+        case "usage":
+          dispatch({
+            type: "add-stats",
+            patch: {
+              promptTokens: event.promptTokens,
+              completionTokens: event.completionTokens,
             },
           });
           break;
@@ -169,6 +204,7 @@ function App() {
           break;
         case "error":
           dispatch({ type: "add-block", block: { id: uid("err"), kind: "error", message: event.message } });
+          dispatch({ type: "add-stats", patch: { errors: 1 } });
           break;
         case "done":
           dispatch({ type: "clear-thinking" });
@@ -176,7 +212,7 @@ function App() {
           break;
       }
     },
-    [flushChunks, state.profile],
+    [flushChunks, state.profile, state.mode],
   );
 
   const runQuestion = useCallback(
@@ -187,6 +223,7 @@ function App() {
       setInputKey();
       dispatch({ type: "set-busy", busy: true });
       answerId.current = null;
+      const turnStart = Date.now();
 
       try {
         const prior = chatHistoryRef.current;
@@ -220,6 +257,8 @@ function App() {
           },
         });
         dispatch({ type: "set-busy", busy: false });
+      } finally {
+        dispatch({ type: "add-stats", patch: { elapsedMs: Date.now() - turnStart } });
       }
     },
     [state.profile, state.busy, state.mode, state.model, handleAgentEvent],
@@ -332,7 +371,11 @@ function App() {
           break;
         }
         case "/refresh":
-          if (state.profile) await refreshSchema(state.profile);
+          if (state.profile) {
+            await refreshSchema(state.profile);
+            dispatch({ type: "bump-schema-version" });
+            reply("Schema refreshed.");
+          }
           break;
         case "/schema": {
           const table = parts[1];
@@ -424,7 +467,11 @@ function App() {
         dispatch({ type: "clear" });
       },
       onRefresh: () => {
-        if (state.profile) refreshSchema(state.profile).catch(console.error);
+        if (state.profile) {
+          refreshSchema(state.profile)
+            .then(() => dispatch({ type: "bump-schema-version" }))
+            .catch(console.error);
+        }
       },
       onQuit: () => renderer.destroy(),
       onAcceptGhost: () => {
@@ -485,6 +532,8 @@ function App() {
   }, [state.input, profiles, tables]);
 
   const showTranscript = !!state.profile || state.blocks.length > 0;
+  const showSidebar = !!state.profile && termWidth >= 84;
+  const SIDEBAR_WIDTH = 32;
 
   return (
     <box
@@ -496,25 +545,41 @@ function App() {
         backgroundColor: theme.bg,
       }}
     >
-      <StatusStrip profile={state.profile} mode={state.mode} model={state.model} />
       <box
         style={{
           flexGrow: 1,
           minHeight: 0,
           flexShrink: 1,
-          flexDirection: "column",
+          flexDirection: "row",
           width: "100%",
         }}
       >
-        {showTranscript ? (
-          <Transcript
-            blocks={state.blocks}
-            database={state.database}
-            onExample={(q) => handleSubmit(q)}
+        {showSidebar && (
+          <SchemaSidebar
+            width={SIDEBAR_WIDTH}
+            profile={state.profile}
+            conn={sidebarConn}
+            schema={fullSchema}
           />
-        ) : (
-          <NoProfileState profiles={profiles} />
         )}
+        <box
+          style={{
+            flexGrow: 1,
+            minHeight: 0,
+            flexShrink: 1,
+            flexDirection: "column",
+          }}
+        >
+          {showTranscript ? (
+            <Transcript
+              blocks={state.blocks}
+              database={state.database}
+              onExample={(q) => handleSubmit(q)}
+            />
+          ) : (
+            <NoProfileState profiles={profiles} />
+          )}
+        </box>
       </box>
       <box style={{ position: "relative", width: "100%", flexShrink: 0 }}>
         {showSlashMenu && (
@@ -538,6 +603,13 @@ function App() {
           onSubmit={handleSubmit}
         />
       </box>
+      <StatusBar
+        profile={state.profile}
+        mode={state.mode}
+        model={state.model}
+        stats={state.stats}
+        busy={state.busy}
+      />
       {state.paletteOpen && (
         <CommandPalette
           filter={state.input}

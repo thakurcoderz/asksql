@@ -9,6 +9,7 @@ import {
   resolveActiveProfile,
   profileExists,
 } from "../core/profiles/index.ts";
+import { isValidProfileName } from "../core/paths.ts";
 import { promptNewProfile } from "./new.ts";
 import { installAlias } from "./alias.ts";
 import { runAsk } from "./ask.ts";
@@ -49,6 +50,10 @@ const main = defineCommand({
         loadEnvCascade();
         requireOpenRouterKey();
         const name = String(args.name);
+        if (!isValidProfileName(name)) {
+          console.error(`Invalid profile name '${name}'`);
+          process.exit(1);
+        }
         if (!profileExists(name)) {
           console.error(`Profile '${name}' not found`);
           process.exit(1);
@@ -76,6 +81,14 @@ const main = defineCommand({
         loadEnvCascade();
         requireOpenRouterKey();
         const name = String(args.name);
+        if (!isValidProfileName(name)) {
+          console.error(`Invalid profile name '${name}'`);
+          process.exit(1);
+        }
+        if (!profileExists(name)) {
+          console.error(`Profile '${name}' not found`);
+          process.exit(1);
+        }
         process.stdout.write(`Delete profile '${name}'? [y/N]: `);
         const answer = await new Promise<string>((resolve) => {
           process.stdin.once("data", (d) => resolve(d.toString().trim()));
@@ -97,8 +110,14 @@ const main = defineCommand({
       run: async ({ args }) => {
         loadEnvCascade();
         requireOpenRouterKey();
-        renameProfile(String(args.old), String(args.new));
-        console.log(`Renamed '${args.old}' → '${args.new}'`);
+        const oldName = String(args.old);
+        const newName = String(args.new);
+        if (!isValidProfileName(oldName) || !isValidProfileName(newName)) {
+          console.error("Invalid profile name");
+          process.exit(1);
+        }
+        renameProfile(oldName, newName);
+        console.log(`Renamed '${oldName}' → '${newName}'`);
       },
     }),
     ask: defineCommand({

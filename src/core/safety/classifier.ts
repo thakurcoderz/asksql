@@ -48,6 +48,58 @@ function firstKeyword(statement: string): string {
   return match?.[1]?.toUpperCase() ?? "";
 }
 
+/**
+ * Returns the uppercased words that appear at parenthesis depth 0, in order.
+ * CTE definitions (`name AS (...)`) live inside parentheses, so their inner
+ * keywords are at depth >= 1 and are skipped. This lets us find the keyword
+ * that actually introduces a WITH statement's main body.
+ */
+function topLevelWords(statement: string): string[] {
+  const cleaned = stripComments(statement);
+  const words: string[] = [];
+  let depth = 0;
+  let current = "";
+  const flush = () => {
+    if (current) {
+      words.push(current.toUpperCase());
+      current = "";
+    }
+  };
+  for (let i = 0; i < cleaned.length; i++) {
+    const ch = cleaned[i]!;
+    if (ch === "(") {
+      flush();
+      depth++;
+    } else if (ch === ")") {
+      flush();
+      if (depth > 0) depth--;
+    } else if (depth === 0 && /\w/.test(ch)) {
+      current += ch;
+    } else if (depth === 0) {
+      flush();
+    }
+  }
+  flush();
+  return words;
+}
+
+/**
+ * Classify a `WITH ...` statement by the first statement-introducing keyword
+ * that appears outside the CTE definition parentheses. A CTE can prefix not
+ * only SELECT but also DELETE/UPDATE/INSERT/REPLACE in MySQL, so we must not
+ * assume "contains SELECT" means read-only.
+ */
+function classifyWith(statement: string): SqlKind {
+  const words = topLevelWords(statement);
+  for (const w of words) {
+    if (w === "WITH" || w === "RECURSIVE" || w === "AS") continue;
+    if (w === "SELECT") return "READ";
+    if (WRITE_KEYWORDS.has(w)) return "WRITE";
+    if (DDL_KEYWORDS.has(w)) return "DDL";
+  }
+  return "UNKNOWN";
+}
+
 function classifyStatement(statement: string): SqlKind {
   const trimmed = stripComments(statement).trim();
   if (!trimmed) return "EMPTY";
@@ -60,7 +112,7 @@ function classifyStatement(statement: string): SqlKind {
 
   if (READ_KEYWORDS.has(kw)) {
     if (kw === "WITH") {
-      return /\bSELECT\b/i.test(upper) ? "READ" : "UNKNOWN";
+      return classifyWith(trimmed);
     }
     return "READ";
   }

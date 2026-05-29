@@ -74,6 +74,8 @@ export async function createProfile(config: DbConfig, overwrite = false): Promis
     throw new Error(`Profile '${name}' already exists`);
   }
   mkdirSync(dir, { recursive: true });
+  // Profile dirs hold connection.env with DB credentials; keep them owner-only.
+  chmodSync(dir, 0o700);
 
   const envPath = connectionEnvPath(name);
   writeFileSync(envPath, formatConnectionEnv(config), "utf8");
