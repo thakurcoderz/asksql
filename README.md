@@ -187,4 +187,4 @@ See [`CLAUDE.md`](CLAUDE.md) for Bun-specific API preferences.
 
 ## License
 
-Private POC — see repository owner for terms.
+[MIT](LICENSE) © 2026 Saurabh Singh
