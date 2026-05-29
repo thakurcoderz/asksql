@@ -115,3 +115,10 @@ export const MAX_AGENT_STEPS = 10;
 export const MAX_RESULT_BYTES = 50_000;
 export const MAX_CELL_DISPLAY = 60;
 export const DEFAULT_READ_LIMIT = 100;
+/**
+ * Hard server-side ceiling on rows returned by a read query, enforced via
+ * SQL_SELECT_LIMIT regardless of the SQL text. This is the memory-safety net
+ * that backstops ensureLimit(), which can be skipped when the query already
+ * contains the token "LIMIT" (e.g. inside a subquery).
+ */
+export const MAX_READ_ROWS = 5_000;
