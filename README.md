@@ -4,6 +4,8 @@ Natural-language MySQL assistant powered by OpenRouter and OpenTUI.
 
 Ask questions in plain English; AskSQL inspects schema, runs gated SQL, and shows results in a terminal UI or CLI.
 
+A two-column dashboard keeps your database context in view (live schema sidebar + session stats), and a layered safety model (mode gating, a SQL classifier, database-enforced read-only transactions, and prompt-injection fencing) keeps the agent from doing anything you didn't intend.
+
 ![AskSQL TUI — natural language to SQL with schema inspection and formatted results](demo.jpg)
 
 ## Install
@@ -84,7 +86,36 @@ Commands are grouped by what you’re doing: **chat** vs **database** vs **sessi
 | `/help` | Toggle help overlay |
 | `Esc` | Close help or palette |
 
-## Safety modes
+## Terminal UI
+
+The TUI is a two-column dashboard so database context stays visible while you chat.
+
+```
+┌ Schema ─────────┐┌ Conversation ───────────────────┐
+│ root@127.0.0.1  ││ › users who signed up this week  │
+│ demo            ││ ┌ read · 1 row · 42ms · safe ──┐ │
+│ 12 tables · 18k ││ │ SELECT COUNT(*) FROM users   │ │
+│ refreshed 5m ago││ │ count                        │ │
+│ TABLES          ││ │ 128                          │ │
+│ users     ~1.2k ││ └──────────────────────────────┘ │
+│ id, email, …    ││ 128 users signed up this week.   │
+│ orders    ~8.4k ││                                  │
+└─────────────────┘└──────────────────────────────────┘
+ › ask anything…
+ asksql · demo · safe · gpt-5.4-nano · 3 queries · 0 err · 1.4s · 2.1k tok · /help
+```
+
+- **Schema sidebar** — connection identity, table/row totals, last refresh, and a scrollable table list with per-table row counts, a column preview, and foreign-key counts. Collapses automatically on terminals narrower than 84 columns.
+- **Query cards** — each executed statement shows its result rows, **execution time**, and the **safety mode** it ran under.
+- **Status bar** — profile, mode, model, plus live **session stats**: queries run, errors, cumulative elapsed time, and token usage. A `working…` indicator shows while the agent is busy.
+
+`/refresh` (or `Ctrl+R`) re-introspects the database and live-updates the sidebar.
+
+## Safety & security
+
+AskSQL turns model-generated SQL into real database calls, so safety is layered — no single check is trusted on its own.
+
+### Safety modes
 
 | Mode | Reads | Writes / DDL |
 |------|-------|----------------|
@@ -93,6 +124,14 @@ Commands are grouped by what you’re doing: **chat** vs **database** vs **sessi
 | `yolo` | Allowed | Allowed without prompt |
 
 Default mode comes from `ASKSQL_MODE` (or legacy `DBAI_MODE`) or `~/.asksql/config.toml`.
+
+### Defense in depth
+
+- **SQL classifier & mode gating** — every statement is classified (read / write / DDL / multi) and gated against the active mode. Stacked statements are rejected (and the driver runs with `multipleStatements: false`). CTEs are parsed structurally, so a write hidden behind `WITH … DELETE` is correctly treated as a write, not a read.
+- **Database-enforced read-only** — the read tool runs inside a `START TRANSACTION READ ONLY`, so MySQL itself rejects any write or DDL that slips past the classifier.
+- **Bounded results** — reads run under a server-side `SQL_SELECT_LIMIT` row cap to bound memory, in addition to a default `LIMIT`.
+- **Prompt-injection fencing** — schema metadata and `memory.md` are attacker-influenceable, so they're wrapped in delimited "untrusted data" blocks with an instruction never to treat them as commands.
+- **Path-safe profiles** — profile names are validated (no `..`, path separators, or null bytes) before touching the filesystem; `connection.env` and profile/app directories are written with owner-only permissions.
 
 ## Config & profiles
 
@@ -144,10 +183,10 @@ After changing the CLI entrypoint, run `bun link` so `~/.bun/bin/asksql` picks u
 
 ### Architecture (short)
 
-1. User message → `runAgentTurn()` streams `AgentEvent`s.
-2. Agent calls tools: schema inspect, SQL read/write (gated), memory update.
-3. TUI maps events to **transcript blocks** (user, execution cards, tables, streaming answer).
-4. Pure format helpers (`tableLayout`, `transcriptMerge`, `answerSanitize`) keep rendering testable.
+1. User message → `runAgentTurn()` streams `AgentEvent`s (including per-query timing and token `usage`).
+2. Agent calls tools: schema inspect, SQL read/write (gated, read-only-enforced), memory update.
+3. TUI maps events to **transcript blocks** (user, execution cards, tables, streaming answer) and accumulates `SessionStats` for the status bar.
+4. Pure format helpers (`tableLayout`, `transcriptMerge`, `answerSanitize`, `numbers`) keep rendering testable.
 
 ## Cursor AI setup
 
