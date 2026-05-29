@@ -1,5 +1,8 @@
 # AskSQL
 
+[![CI](https://github.com/thakurcoderz/asksql/actions/workflows/ci.yml/badge.svg)](https://github.com/thakurcoderz/asksql/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Natural-language MySQL assistant powered by OpenRouter and OpenTUI.
 
 Ask questions in plain English; AskSQL inspects schema, runs gated SQL, and shows results in a terminal UI or CLI.
