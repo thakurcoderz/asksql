@@ -26,20 +26,6 @@ The terminal UI is a two-column dashboard so database context stays visible whil
 
 ![AskSQL dashboard — schema sidebar, query cards with timing and mode, and a session-stats footer](https://raw.githubusercontent.com/thakurcoderz/asksql/main/demo.jpg)
 
-```
-┌ Schema ─────────┐┌ Conversation ───────────────────┐
-│ root@127.0.0.1  ││ › users who signed up this week  │
-│ demo            ││ ┌ read · 1 row · 42ms · safe ──┐ │
-│ 12 tables · 18k ││ │ SELECT COUNT(*) FROM users   │ │
-│ refreshed 5m ago││ │ count                        │ │
-│ TABLES          ││ │ 128                          │ │
-│ users     ~1.2k ││ └──────────────────────────────┘ │
-│ id, email, …    ││ 128 users signed up this week.   │
-└─────────────────┘└──────────────────────────────────┘
- › ask anything…
- asksql · demo · safe · gpt-5.4-nano · 3 queries · 0 err · 1.4s · /help
-```
-
 ### Schema sidebar (left)
 
 Shows your connection at a glance and the cached schema:
