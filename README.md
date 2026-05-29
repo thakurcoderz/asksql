@@ -88,22 +88,7 @@ Commands are grouped by what you’re doing: **chat** vs **database** vs **sessi
 
 ## Terminal UI
 
-The TUI is a two-column dashboard so database context stays visible while you chat.
-
-```
-┌ Schema ─────────┐┌ Conversation ───────────────────┐
-│ root@127.0.0.1  ││ › users who signed up this week  │
-│ demo            ││ ┌ read · 1 row · 42ms · safe ──┐ │
-│ 12 tables · 18k ││ │ SELECT COUNT(*) FROM users   │ │
-│ refreshed 5m ago││ │ count                        │ │
-│ TABLES          ││ │ 128                          │ │
-│ users     ~1.2k ││ └──────────────────────────────┘ │
-│ id, email, …    ││ 128 users signed up this week.   │
-│ orders    ~8.4k ││                                  │
-└─────────────────┘└──────────────────────────────────┘
- › ask anything…
- asksql · demo · safe · gpt-5.4-nano · 3 queries · 0 err · 1.4s · 2.1k tok · /help
-```
+The TUI is a two-column dashboard so database context stays visible while you chat (see the screenshot above).
 
 - **Schema sidebar** — connection identity, table/row totals, last refresh, and a scrollable table list with per-table row counts, a column preview, and foreign-key counts. Collapses automatically on terminals narrower than 84 columns.
 - **Query cards** — each executed statement shows its result rows, **execution time**, and the **safety mode** it ran under.
