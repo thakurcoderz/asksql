@@ -294,23 +294,28 @@ async function executeTool(
     }
     case "run_sql_read": {
       const query = String(args.query ?? "");
+      const start = Date.now();
       const result = await runSqlRead(ctx.profileName, query);
+      const durationMs = Date.now() - start;
       if ("error" in result) {
-        ctx.onEvent({ type: "execution", tool: "run_sql_read", sql: query, error: result.error });
+        ctx.onEvent({ type: "execution", tool: "run_sql_read", sql: query, error: result.error, durationMs });
       } else {
-        ctx.onEvent({ type: "execution", tool: "run_sql_read", sql: query, result });
+        ctx.onEvent({ type: "execution", tool: "run_sql_read", sql: query, result, durationMs });
       }
       return result;
     }
     case "run_sql_write": {
       const query = String(args.query ?? "");
+      const start = Date.now();
       const result = await runSqlWrite(ctx, query);
+      const durationMs = Date.now() - start;
       ctx.onEvent({
         type: "execution",
         tool: "run_sql_write",
         sql: query,
         writeResult: result,
         error: result.error,
+        durationMs,
       });
       return result;
     }
@@ -354,6 +359,7 @@ export async function runAgentTurn(
       messages,
       tools: TOOLS,
       stream: true,
+      stream_options: { include_usage: true },
     });
 
     let content = "";
@@ -361,6 +367,13 @@ export async function runAgentTurn(
     let hadToolCalls = false;
 
     for await (const chunk of stream) {
+      if (chunk.usage) {
+        ctx.onEvent({
+          type: "usage",
+          promptTokens: chunk.usage.prompt_tokens ?? 0,
+          completionTokens: chunk.usage.completion_tokens ?? 0,
+        });
+      }
       const delta = chunk.choices[0]?.delta;
       if (!delta) continue;
 

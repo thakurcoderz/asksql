@@ -100,6 +100,8 @@ export function Transcript(props: {
                   result={block.result}
                   writeResult={block.writeResult}
                   error={block.error}
+                  durationMs={block.durationMs}
+                  mode={block.mode}
                   collapsed={collapsed.has(block.id)}
                 />
               );
